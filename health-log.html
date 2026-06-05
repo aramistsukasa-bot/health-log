@@ -1,0 +1,1295 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>健康ログ AI</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:         #f5f0e8;
+      --bg-card:    #fdfaf5;
+      --blue-dark:  #38b6bf;
+      --blue:       #5bc8d0;
+      --blue-light: #93dfe6;
+      --beige:      #e8d5b7;
+      --beige-dark: #c9b99a;
+      --text:       #3d3529;
+      --text-light: #7a6e5f;
+      --border:     #ddd5c5;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      background: var(--blue-dark);
+      color: #fff;
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 1.05rem; font-weight: 600; letter-spacing: 0.02em; }
+    .icon-btn {
+      background: none; border: none;
+      color: rgba(255,255,255,0.8);
+      font-size: 1.15rem; cursor: pointer;
+      padding: 5px 8px; border-radius: 7px;
+      transition: background 0.15s, color 0.15s;
+    }
+    .icon-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      background: var(--blue-dark);
+      border-top: 1px solid rgba(255,255,255,0.08);
+      flex-shrink: 0;
+    }
+    .tab-btn {
+      flex: 1; padding: 9px 0;
+      background: none; border: none;
+      color: rgba(255,255,255,0.55);
+      font-size: 0.83rem; cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab-btn.active { color: #fff; border-bottom-color: var(--beige); }
+
+    /* ── Panels ── */
+    main { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+    .tab-panel { display: none; flex: 1; overflow: hidden; flex-direction: column; }
+    .tab-panel.active { display: flex; }
+
+    /* ── Chat Messages ── */
+    .chat-messages {
+      flex: 1; overflow-y: auto;
+      padding: 14px 16px;
+      display: flex; flex-direction: column; gap: 10px;
+      scroll-behavior: smooth;
+    }
+    .msg-wrap { display: flex; flex-direction: column; max-width: 82%; }
+    .msg-wrap.user { align-self: flex-end; align-items: flex-end; }
+    .msg-wrap.ai   { align-self: flex-start; }
+    .msg-wrap.ai .msg-inner { display: flex; align-items: flex-end; gap: 8px; }
+    .ai-avatar {
+      font-size: 1.6rem; line-height: 1;
+      flex-shrink: 0; align-self: flex-end;
+      margin-bottom: 2px;
+    }
+    .msg-label { font-size: 0.68rem; color: var(--text-light); margin-bottom: 3px; padding: 0 4px; }
+    .msg-wrap.user .msg-label { text-align: right; }
+    .bubble {
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 0.88rem;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg-wrap.ai .bubble {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 4px;
+      color: var(--text);
+    }
+    .msg-wrap.user .bubble {
+      background: var(--blue);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .msg-system {
+      align-self: center;
+      font-size: 0.75rem;
+      color: var(--text-light);
+      padding: 4px 0;
+    }
+
+    /* ── Status bar ── */
+    .status-bar {
+      display: flex; align-items: center; gap: 7px;
+      padding: 5px 16px;
+      font-size: 0.75rem;
+      color: var(--text-light);
+      background: var(--bg);
+      min-height: 26px;
+      flex-shrink: 0;
+    }
+    .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--beige-dark); flex-shrink: 0;
+    }
+    .dot.recording { background: #d95050; animation: blink 1s infinite; }
+    .dot.thinking  { background: var(--blue-light); animation: blink 0.7s infinite; }
+    .dot.speaking  { background: #5baa6e; animation: blink 0.5s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    /* ── Voice controls ── */
+    .voice-controls {
+      padding: 12px 16px 16px;
+      background: var(--bg-card);
+      border-top: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      align-items: center; gap: 10px;
+      flex-shrink: 0;
+    }
+    .transcript-box {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 7px 12px;
+      font-size: 0.82rem;
+      color: var(--text-light);
+      min-height: 34px;
+      text-align: center;
+      line-height: 1.4;
+    }
+    .mic-row { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .mic-btn {
+      width: 62px; height: 62px; border-radius: 50%;
+      border: none;
+      background: var(--blue);
+      color: #fff; font-size: 1.5rem;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 3px 14px rgba(91,200,208,0.45);
+      transition: transform 0.1s, background 0.2s, box-shadow 0.2s;
+    }
+    .mic-btn:active { transform: scale(0.94); }
+    .mic-btn.recording {
+      background: #d95050;
+      box-shadow: 0 0 0 0 rgba(217,80,80,0.5);
+      animation: ripple 1.4s infinite;
+    }
+    @keyframes ripple {
+      0%   { box-shadow: 0 0 0 0 rgba(217,80,80,0.45); }
+      70%  { box-shadow: 0 0 0 18px rgba(217,80,80,0); }
+      100% { box-shadow: 0 0 0 0 rgba(217,80,80,0); }
+    }
+    .mic-hint { font-size: 0.7rem; color: var(--text-light); }
+    .text-row { display: flex; gap: 8px; width: 100%; }
+    .text-input {
+      flex: 1; padding: 9px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 0.88rem;
+      background: var(--bg); color: var(--text);
+      outline: none;
+    }
+    .text-input:focus { border-color: var(--blue-light); }
+    .send-btn {
+      background: var(--blue); color: #fff;
+      border: none; border-radius: 10px;
+      padding: 9px 16px; font-size: 0.88rem;
+      cursor: pointer; white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .send-btn:hover { background: var(--blue-dark); }
+
+    /* ── Meds section ── */
+    .meds-section {
+      width: 100%;
+      display: flex; flex-direction: column; gap: 6px;
+      padding-bottom: 2px;
+      border-bottom: 1px solid var(--border);
+    }
+    .meds-header-row {
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .meds-label { font-size: 0.75rem; color: var(--text-light); }
+    .add-med-btn {
+      font-size: 0.72rem; color: var(--blue-dark);
+      background: none; border: 1px solid var(--blue-light);
+      border-radius: 12px; padding: 2px 9px; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .add-med-btn:hover { background: var(--beige); }
+    .add-med-row {
+      display: none; gap: 6px;
+    }
+    .add-med-row.open { display: flex; }
+    .add-med-input {
+      flex: 1; padding: 6px 10px;
+      border: 1px solid var(--border); border-radius: 8px;
+      font-size: 0.85rem; background: var(--bg); color: var(--text);
+      outline: none;
+    }
+    .add-med-input:focus { border-color: var(--blue-light); }
+    .add-med-save {
+      background: var(--blue); color: #fff;
+      border: none; border-radius: 8px;
+      padding: 6px 12px; font-size: 0.82rem; cursor: pointer;
+      white-space: nowrap;
+    }
+    .meds-chips {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      min-height: 28px;
+    }
+    .med-chip-wrap { position: relative; display: inline-flex; }
+    .med-chip {
+      background: var(--beige);
+      border: 1px solid var(--beige-dark);
+      border-radius: 16px;
+      padding: 5px 46px 5px 12px;
+      font-size: 0.8rem; color: var(--blue-dark);
+      cursor: pointer;
+      display: inline-flex; flex-direction: column; align-items: flex-start;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .med-chip:active { transform: scale(0.95); }
+    .med-chip:hover { background: #dfc9a2; }
+    .med-chip-times { font-size: 0.65rem; color: var(--text-light); margin-top: 2px; }
+    .med-time-btn {
+      position: absolute; right: 22px; top: 50%;
+      transform: translateY(-50%);
+      background: none; border: none;
+      font-size: 0.72rem; color: var(--beige-dark);
+      cursor: pointer; padding: 2px 3px; line-height: 1;
+      border-radius: 50%;
+    }
+    .med-time-btn:hover { color: var(--blue-dark); background: rgba(0,0,0,0.06); }
+    .med-time-btn.set { color: var(--blue-dark); }
+    .med-del {
+      position: absolute; right: 4px; top: 50%;
+      transform: translateY(-50%);
+      background: none; border: none;
+      font-size: 0.7rem; color: var(--beige-dark);
+      cursor: pointer; padding: 2px 3px; line-height: 1;
+      border-radius: 50%;
+    }
+    .med-del:hover { color: #c05050; background: rgba(0,0,0,0.06); }
+    .meds-empty { font-size: 0.75rem; color: var(--beige-dark); align-self: center; }
+    .med-time-editor {
+      display: none; flex-direction: column; gap: 7px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 12px; width: 100%;
+    }
+    .med-time-editor.open { display: flex; }
+    .med-time-editor-header { font-size: 0.78rem; font-weight: 600; color: var(--blue-dark); }
+    .med-slot-row { display: flex; align-items: center; gap: 8px; }
+    .med-slot-label { font-size: 0.78rem; color: var(--text); min-width: 38px; }
+    .med-time-input {
+      flex: 1; border: 1px solid var(--border); border-radius: 6px;
+      padding: 4px 8px; font-size: 0.82rem;
+      background: var(--bg-card); color: var(--text); outline: none;
+    }
+    .med-time-input:focus { border-color: var(--blue-light); }
+    .med-slot-clear {
+      background: none; color: var(--beige-dark);
+      border: none; font-size: 0.75rem;
+      cursor: pointer; padding: 2px 5px; border-radius: 4px;
+    }
+    .med-slot-clear:hover { color: #c05050; background: rgba(0,0,0,0.06); }
+    .med-time-editor-footer {
+      display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px;
+    }
+    .med-time-save {
+      background: var(--blue); color: #fff;
+      border: none; border-radius: 6px;
+      padding: 5px 16px; font-size: 0.8rem; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .med-time-save:hover { background: var(--blue-dark); }
+    .med-time-close {
+      background: none; color: var(--text-light);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 5px 10px; font-size: 0.8rem; cursor: pointer;
+    }
+
+    /* ── Records Tab ── */
+    .records-header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 16px 4px;
+      flex-shrink: 0;
+    }
+    .records-title { font-size: 0.88rem; font-weight: 600; color: var(--blue-dark); }
+    .clear-btn {
+      font-size: 0.75rem; color: var(--text-light);
+      background: none; border: 1px solid var(--border);
+      border-radius: 6px; padding: 4px 10px; cursor: pointer;
+    }
+    .records-scroll {
+      flex: 1; overflow-y: auto;
+      padding: 8px 16px 16px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .record-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 13px 16px;
+    }
+    .record-card.cond-good   { background: #e8f5ea; border-color: #b6debb; }
+    .record-card.cond-normal { background: #fefce8; border-color: #e8dfa0; }
+    .record-card.cond-bad    { background: #ffd6d6; border-color: #f0bfc9; }
+    .record-date { font-size: 0.77rem; color: var(--text-light); margin-bottom: 8px; }
+    .metrics-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .chip {
+      background: var(--beige);
+      border-radius: 20px;
+      padding: 4px 11px;
+      font-size: 0.8rem;
+      color: var(--blue-dark);
+      font-weight: 500;
+    }
+    .record-memo { margin-top: 8px; font-size: 0.82rem; color: var(--text-light); line-height: 1.4; }
+    .empty-state {
+      text-align: center; color: var(--text-light);
+      padding: 50px 20px; font-size: 0.88rem; line-height: 1.8;
+    }
+
+    /* ── Chat Quick Analysis ── */
+    .chat-analysis-row {
+      display: flex; gap: 6px; width: 100%;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .chat-analysis-btn {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 4px;
+      font-size: 0.74rem; color: var(--blue-dark);
+      cursor: pointer; text-align: center; line-height: 1.35;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    }
+    .chat-analysis-btn:hover  { background: var(--beige); border-color: var(--beige-dark); }
+    .chat-analysis-btn:active { transform: scale(0.95); }
+
+    /* ── Analysis Tab ── */
+    .analysis-body {
+      flex: 1; overflow-y: auto;
+      padding: 12px 16px 16px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .analysis-section-label {
+      font-size: 0.75rem; color: var(--text-light); margin-bottom: 2px;
+    }
+    .analysis-btns {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    }
+    .analysis-btn {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 0.82rem; color: var(--text);
+      cursor: pointer; text-align: left; line-height: 1.45;
+      transition: background 0.15s, border-color 0.15s, transform 0.1s;
+    }
+    .analysis-btn:hover  { background: var(--beige); border-color: var(--beige-dark); }
+    .analysis-btn:active { transform: scale(0.96); }
+    .analysis-btn .btn-icon { font-size: 1rem; display: block; margin-bottom: 3px; }
+    .analysis-custom-row { display: flex; gap: 8px; }
+    .analysis-input {
+      flex: 1; padding: 9px 12px;
+      border: 1px solid var(--border); border-radius: 10px;
+      font-size: 0.85rem; background: var(--bg); color: var(--text); outline: none;
+    }
+    .analysis-input:focus { border-color: var(--blue-light); }
+    .analysis-ask-btn {
+      background: var(--blue); color: #fff;
+      border: none; border-radius: 10px;
+      padding: 9px 14px; font-size: 0.85rem;
+      cursor: pointer; white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .analysis-ask-btn:hover { background: var(--blue-dark); }
+    .analysis-result {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      min-height: 100px;
+    }
+    .analysis-result-q {
+      font-size: 0.75rem; font-weight: 600;
+      color: var(--blue-dark); margin-bottom: 8px;
+    }
+    .analysis-result-text {
+      font-size: 0.85rem; color: var(--text);
+      line-height: 1.7; white-space: pre-wrap; word-break: break-word;
+    }
+    .analysis-placeholder {
+      font-size: 0.84rem; color: var(--text-light);
+      line-height: 1.8; text-align: center; padding: 16px 0;
+    }
+    .analysis-loading {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 0.82rem; color: var(--text-light); padding: 16px 0;
+    }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: #38b6bf; color: #fff;
+      padding: 9px 20px; border-radius: 20px;
+      font-size: 0.82rem; opacity: 0;
+      transition: opacity 0.25s, transform 0.25s;
+      pointer-events: none; z-index: 300; white-space: nowrap;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* ── API Key Modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(10,55,70,0.52);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 200; padding: 24px;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal-card {
+      background: var(--bg-card);
+      border-radius: 18px;
+      padding: 28px 24px;
+      width: 100%; max-width: 380px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    }
+    .modal-card h2 { font-size: 1.08rem; color: var(--blue-dark); margin-bottom: 8px; }
+    .modal-desc { font-size: 0.82rem; color: var(--text-light); margin-bottom: 18px; line-height: 1.6; }
+    .modal-input {
+      width: 100%; padding: 10px 12px;
+      border: 1px solid var(--border); border-radius: 10px;
+      font-size: 0.9rem; background: var(--bg); color: var(--text);
+      margin-bottom: 12px; outline: none;
+    }
+    .modal-input:focus { border-color: var(--blue-light); }
+    .modal-save-btn {
+      width: 100%; padding: 11px;
+      background: var(--blue); color: #fff;
+      border: none; border-radius: 10px;
+      font-size: 0.93rem; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .modal-save-btn:hover { background: var(--blue-dark); }
+    .modal-note { font-size: 0.72rem; color: var(--text-light); margin-top: 10px; text-align: center; }
+  </style>
+</head>
+<body>
+
+<div class="toast" id="toast"></div>
+
+<!-- API Key Modal -->
+<div class="modal-overlay hidden" id="apiModal">
+  <div class="modal-card">
+    <h2>🔑 APIキーを設定</h2>
+    <p class="modal-desc">Claude AI と会話するために Anthropic の APIキーが必要です。キーはこのデバイスの localStorage にのみ保存され、外部には送信されません。</p>
+    <div id="apiKeyStatus" style="font-size:0.78rem;padding:8px 12px;border-radius:8px;margin-bottom:12px;display:none;"></div>
+    <input class="modal-input" type="text" id="apiKeyInput" placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+    <button class="modal-save-btn" onclick="saveApiKey()">保存して始める</button>
+    <p class="modal-note">Anthropic Console でキーを取得できます</p>
+    <div id="corsWarning" style="display:none;margin-top:14px;padding:10px 12px;background:#fff8e8;border:1px solid #e8d5a0;border-radius:10px;font-size:0.75rem;color:#7a5a10;line-height:1.7;">
+      ⚠️ <strong>CORS エラーが検出されました</strong><br>
+      このファイルを <code>file://</code> で開くと API に接続できません。<br>
+      ターミナルで以下を実行してから <code>http://localhost:8080/health-log.html</code> を開いてください：<br>
+      <code style="display:block;margin-top:6px;background:#f0e8d0;padding:5px 8px;border-radius:6px;font-size:0.82rem;">python3 -m http.server 8080</code>
+    </div>
+  </div>
+</div>
+
+<!-- Header -->
+<header>
+  <h1>🐕‍🦺 健康ログ AI</h1>
+  <button class="icon-btn" title="APIキー設定" onclick="openApiModal()">⚙️</button>
+</header>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab-btn active" data-tab="chat" onclick="switchTab(this)">🎙 チャット</button>
+  <button class="tab-btn" data-tab="records" onclick="switchTab(this)">📋 記録</button>
+  <button class="tab-btn" data-tab="analysis" onclick="switchTab(this)">📊 分析</button>
+</div>
+
+<main>
+  <!-- Chat Tab -->
+  <div class="tab-panel active" id="tab-chat">
+    <div class="chat-messages" id="chatMessages">
+      <p class="msg-system">マイクボタンを押して話しかけてください</p>
+    </div>
+
+    <div class="status-bar">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">待機中</span>
+    </div>
+
+    <div class="voice-controls">
+      <!-- Quick analysis -->
+      <div class="chat-analysis-row">
+        <button class="chat-analysis-btn" onclick="chatAnalysis('今週（直近7日）の体調・睡眠・歩数の傾向を分析して。')">📅 今週はどう？</button>
+        <button class="chat-analysis-btn" onclick="chatAnalysis('先月と今月を比べて体調や数値に変化はある？')">📆 先月と比べて</button>
+        <button class="chat-analysis-btn" onclick="chatAnalysis('体調の全体的な傾向と気になるパターンを分析して。')">📊 体調の傾向は？</button>
+      </div>
+      <!-- Meds quick-tap -->
+      <div class="meds-section">
+        <div class="meds-header-row">
+          <span class="meds-label">💊 よく飲む薬</span>
+          <button class="add-med-btn" onclick="toggleAddMed()">＋ 追加</button>
+        </div>
+        <div class="add-med-row" id="addMedRow">
+          <input class="add-med-input" type="text" id="addMedInput"
+            placeholder="薬の名前（例：ロキソニン）"
+            onkeydown="if(event.key==='Enter')addMed()">
+          <button class="add-med-save" onclick="addMed()">登録</button>
+        </div>
+        <div class="meds-chips" id="medsChips"></div>
+        <div class="med-time-editor" id="medTimeEditor">
+          <div class="med-time-editor-header" id="medTimeEditorLabel"></div>
+          <div class="med-slot-row">
+            <span class="med-slot-label">☀️ 朝</span>
+            <input class="med-time-input" type="time" id="medTime朝">
+            <button class="med-slot-clear" onclick="clearSlot('朝')" title="クリア">×</button>
+          </div>
+          <div class="med-slot-row">
+            <span class="med-slot-label">🌤 昼</span>
+            <input class="med-time-input" type="time" id="medTime昼">
+            <button class="med-slot-clear" onclick="clearSlot('昼')" title="クリア">×</button>
+          </div>
+          <div class="med-slot-row">
+            <span class="med-slot-label">🌙 夜</span>
+            <input class="med-time-input" type="time" id="medTime夜">
+            <button class="med-slot-clear" onclick="clearSlot('夜')" title="クリア">×</button>
+          </div>
+          <div class="med-time-editor-footer">
+            <button class="med-time-close" onclick="closeTimeEditor()">閉じる</button>
+            <button class="med-time-save" onclick="saveMedTimes()">保存</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="transcript-box" id="transcriptBox">認識した音声がここに表示されます</div>
+      <div class="mic-row">
+        <button class="mic-btn" id="micBtn" onclick="toggleRecording()">🎙</button>
+        <span class="mic-hint">タップして音声入力</span>
+      </div>
+      <div class="text-row">
+        <input class="text-input" type="text" id="textInput"
+          placeholder="テキストで入力することもできます"
+          onkeydown="if(event.key==='Enter')sendText()">
+        <button class="send-btn" onclick="sendText()">送信</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Records Tab -->
+  <div class="tab-panel" id="tab-records">
+    <div class="records-header">
+      <span class="records-title">健康記録</span>
+      <button class="clear-btn" onclick="clearAllRecords()">全削除</button>
+    </div>
+    <div class="records-scroll" id="recordsContainer"></div>
+  </div>
+
+  <!-- Analysis Tab -->
+  <div class="tab-panel" id="tab-analysis">
+    <div class="analysis-body">
+      <div>
+        <div class="analysis-section-label">よく使う質問</div>
+        <div class="analysis-btns" id="analysisBtns"></div>
+      </div>
+      <div>
+        <div class="analysis-section-label">自由に質問</div>
+        <div class="analysis-custom-row">
+          <input class="analysis-input" type="text" id="analysisInput"
+            placeholder="例：水分不足の日はある？"
+            onkeydown="if(event.key==='Enter')sendCustomAnalysis()">
+          <button class="analysis-ask-btn" onclick="sendCustomAnalysis()">聞く</button>
+        </div>
+      </div>
+      <div class="analysis-result" id="analysisResult">
+        <div class="analysis-placeholder">上のボタンや入力欄から質問すると<br>記録データをもとにAIが分析します📊</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ── Constants ──
+const KEY_API    = 'hlai_api_key';
+const KEY_LOGS   = 'hlai_logs_v2';
+const KEY_HIST   = 'hlai_chat_history';
+
+let isRecording  = false;
+let recognition  = null;
+let chatHistory  = [];
+let micStream    = null; // keep alive → prevents re-prompt on each use
+let editingMedIdx = null;
+const notifiedKeys = new Set();
+
+// ── Boot ──
+window.addEventListener('load', () => {
+  if (!localStorage.getItem(KEY_API)) openApiModal();
+  loadAndRenderHistory();
+  initSpeechRecognition();
+  renderMeds();
+  renderAnalysisBtns();
+  requestNotificationPermission();
+  startReminderCheck();
+});
+
+// ══════════════════════════
+//  API Key
+// ══════════════════════════
+function openApiModal() {
+  const saved = localStorage.getItem(KEY_API) || '';
+  document.getElementById('apiKeyInput').value = saved;
+
+  const statusEl = document.getElementById('apiKeyStatus');
+  if (saved) {
+    const masked = saved.slice(0, 10) + '...' + saved.slice(-4);
+    statusEl.textContent = `✓ 保存済み：${masked}`;
+    statusEl.style.cssText = 'font-size:0.78rem;padding:8px 12px;border-radius:8px;margin-bottom:12px;background:#e8f5ee;color:#1e6b3a;border:1px solid #b0ddc0;';
+  } else {
+    statusEl.textContent = '⚠ APIキーが未設定です';
+    statusEl.style.cssText = 'font-size:0.78rem;padding:8px 12px;border-radius:8px;margin-bottom:12px;background:#fff0e8;color:#a05020;border:1px solid #e8c8a0;';
+  }
+  statusEl.style.display = 'block';
+  document.getElementById('apiModal').classList.remove('hidden');
+}
+
+function saveApiKey() {
+  const key = document.getElementById('apiKeyInput').value.trim();
+  if (!key.startsWith('sk-')) {
+    alert('正しいAPIキーを入力してください（"sk-" で始まる文字列です）');
+    return;
+  }
+  try {
+    localStorage.setItem(KEY_API, key);
+    // Verify the write actually persisted (fails in some private-mode browsers)
+    if (localStorage.getItem(KEY_API) !== key) throw new Error('readback mismatch');
+  } catch (_) {
+    alert('APIキーの保存に失敗しました。\nプライベートモードを解除するか、ブラウザの設定でlocalStorageを許可してください。');
+    return;
+  }
+  document.getElementById('apiModal').classList.add('hidden');
+  showToast('APIキーを保存しました ✓');
+}
+
+// ══════════════════════════
+//  Tabs
+// ══════════════════════════
+function switchTab(btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  if (btn.dataset.tab === 'records') renderRecords();
+}
+
+// ══════════════════════════
+//  Speech Recognition
+// ══════════════════════════
+function initSpeechRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
+
+  recognition = new SR();
+  recognition.lang = 'ja-JP';
+  recognition.continuous = false;
+  recognition.interimResults = true;
+
+  recognition.onresult = (e) => {
+    let interim = '', final = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    document.getElementById('transcriptBox').textContent = final || interim || '聞き取り中…';
+    if (final) {
+      stopRecording();
+      sendMessage(final);
+    }
+  };
+  recognition.onerror  = () => stopRecording();
+  recognition.onend    = () => { if (isRecording) stopRecording(); };
+}
+
+function toggleRecording() {
+  if (!recognition) {
+    alert('このブラウザは音声入力に対応していません。テキスト入力をお使いください。');
+    return;
+  }
+  isRecording ? stopRecording() : startRecording();
+}
+
+async function startRecording() {
+  // Acquire and hold the MediaStream once — the browser won't re-prompt
+  // as long as this stream stays open (even between recognition sessions)
+  if (!micStream) {
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      setStatus('idle', 'マイクへのアクセスが拒否されました');
+      document.getElementById('transcriptBox').textContent = 'マイクの使用を許可してください';
+      return;
+    }
+  }
+  isRecording = true;
+  document.getElementById('micBtn').classList.add('recording');
+  document.getElementById('micBtn').textContent = '⏹';
+  document.getElementById('transcriptBox').textContent = '聞き取り中…';
+  setStatus('recording', '録音中');
+  recognition.start();
+}
+
+function stopRecording() {
+  isRecording = false;
+  document.getElementById('micBtn').classList.remove('recording');
+  document.getElementById('micBtn').textContent = '🎙';
+  setStatus('idle', '待機中');
+  try { recognition.stop(); } catch (_) {}
+}
+
+// ══════════════════════════
+//  Text input
+// ══════════════════════════
+function sendText() {
+  const el = document.getElementById('textInput');
+  const t = el.value.trim();
+  if (!t) return;
+  el.value = '';
+  sendMessage(t);
+}
+
+// ══════════════════════════
+//  Chat / Claude API
+// ══════════════════════════
+// ══════════════════════════
+//  Meds
+// ══════════════════════════
+const KEY_MEDS = 'hlai_meds';
+
+const EMPTY_TIMES = () => ({ 朝: null, 昼: null, 夜: null });
+
+function getMeds() {
+  const raw = JSON.parse(localStorage.getItem(KEY_MEDS) || '[]');
+  return raw.map(m => {
+    if (typeof m === 'string') return { name: m, times: EMPTY_TIMES() };
+    if ('time' in m) return { name: m.name, times: { 朝: m.time || null, 昼: null, 夜: null } };
+    return { name: m.name, times: { ...EMPTY_TIMES(), ...m.times } };
+  });
+}
+
+function renderMeds() {
+  const meds = getMeds();
+  const el = document.getElementById('medsChips');
+  if (meds.length === 0) {
+    el.innerHTML = '<span class="meds-empty">＋ 追加ボタンで薬を登録できます</span>';
+    return;
+  }
+  el.innerHTML = meds.map((m, i) => {
+    const slots = [
+      m.times.朝 ? `☀️${m.times.朝}` : null,
+      m.times.昼 ? `🌤${m.times.昼}` : null,
+      m.times.夜 ? `🌙${m.times.夜}` : null,
+    ].filter(Boolean);
+    const hasTime = slots.length > 0;
+    return `
+      <div class="med-chip-wrap">
+        <button class="med-chip" data-med="${escAttr(m.name)}" onclick="takeMedBtn(this)">
+          💊 ${escHtml(m.name)}${hasTime ? `<span class="med-chip-times">${slots.join(' ')}</span>` : ''}
+        </button>
+        <button class="med-time-btn${hasTime ? ' set' : ''}" data-idx="${i}" onclick="openTimeEditor(${i})" title="服薬時間を設定">⏰</button>
+        <button class="med-del" data-idx="${i}" onclick="deleteMedBtn(this)" title="削除">×</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function toggleAddMed() {
+  const row = document.getElementById('addMedRow');
+  row.classList.toggle('open');
+  if (row.classList.contains('open')) document.getElementById('addMedInput').focus();
+}
+
+function addMed() {
+  const input = document.getElementById('addMedInput');
+  const name = input.value.trim();
+  if (!name) return;
+  const meds = getMeds();
+  if (meds.some(m => m.name === name)) { showToast('すでに登録されています'); return; }
+  meds.push({ name, times: EMPTY_TIMES() });
+  localStorage.setItem(KEY_MEDS, JSON.stringify(meds));
+  input.value = '';
+  document.getElementById('addMedRow').classList.remove('open');
+  renderMeds();
+  showToast(`「${name}」を登録しました 💊`);
+}
+
+function deleteMedBtn(btn) {
+  const idx = parseInt(btn.dataset.idx);
+  const meds = getMeds();
+  meds.splice(idx, 1);
+  localStorage.setItem(KEY_MEDS, JSON.stringify(meds));
+  if (editingMedIdx === idx) {
+    editingMedIdx = null;
+    document.getElementById('medTimeEditor').classList.remove('open');
+  }
+  renderMeds();
+}
+
+function takeMedBtn(btn) {
+  sendMessage(`${btn.dataset.med}を飲んだ`);
+}
+
+function escAttr(s) {
+  return s.replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
+}
+
+// ══════════════════════════
+//  Med Time Editor
+// ══════════════════════════
+function openTimeEditor(idx) {
+  if (editingMedIdx === idx) { closeTimeEditor(); return; }
+  const med = getMeds()[idx];
+  editingMedIdx = idx;
+  document.getElementById('medTimeEditorLabel').textContent = `「${med.name}」の服薬時間`;
+  document.getElementById('medTime朝').value = med.times.朝 || '';
+  document.getElementById('medTime昼').value = med.times.昼 || '';
+  document.getElementById('medTime夜').value = med.times.夜 || '';
+  document.getElementById('medTimeEditor').classList.add('open');
+}
+
+function clearSlot(label) {
+  document.getElementById(`medTime${label}`).value = '';
+}
+
+function saveMedTimes() {
+  if (editingMedIdx === null) return;
+  const meds = getMeds();
+  meds[editingMedIdx].times = {
+    朝: document.getElementById('medTime朝').value || null,
+    昼: document.getElementById('medTime昼').value || null,
+    夜: document.getElementById('medTime夜').value || null,
+  };
+  localStorage.setItem(KEY_MEDS, JSON.stringify(meds));
+  closeTimeEditor();
+  renderMeds();
+  showToast('服薬リマインダーを保存しました ⏰');
+}
+
+function closeTimeEditor() {
+  editingMedIdx = null;
+  document.getElementById('medTimeEditor').classList.remove('open');
+}
+
+// ══════════════════════════
+//  Notification / Reminder
+// ══════════════════════════
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') {
+    const result = await Notification.requestPermission();
+    if (result === 'granted') showToast('通知を許可しました 🔔');
+  }
+}
+
+function startReminderCheck() {
+  checkReminders();
+  setInterval(checkReminders, 30000);
+}
+
+function checkReminders() {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const now   = new Date();
+  const today = now.toISOString().split('T')[0];
+  const hhmm  = now.toTimeString().slice(0, 5);
+  getMeds().forEach(med => {
+    [['朝','☀️'], ['昼','🌤'], ['夜','🌙']].forEach(([label, icon]) => {
+      const t = med.times?.[label];
+      if (!t || t !== hhmm) return;
+      const key = `${today}-${med.name}-${label}`;
+      if (notifiedKeys.has(key)) return;
+      notifiedKeys.add(key);
+      new Notification('💊 服薬リマインダー', {
+        body: `${icon} ${label}の ${med.name} を飲む時間です`,
+        tag:  key,
+      });
+    });
+  });
+}
+
+// ══════════════════════════
+const QUICK_REPLIES = [
+  {
+    match: (t) => /^おはよう(ございます)?[!！。\s]*$/u.test(t.trim()),
+    reply: 'おはようございます！今日の体調はいかがですか？\n体重・睡眠・歩数など、気になることを話しかけてくださいね🐕‍🦺',
+  },
+];
+
+function sendMessage(text) {
+  const apiKey = localStorage.getItem(KEY_API);
+  if (!apiKey) { openApiModal(); return; }
+
+  appendBubble('user', text);
+  chatHistory.push({ role: 'user', content: text });
+  persistHistory();
+
+  const quick = QUICK_REPLIES.find(r => r.match(text));
+  if (quick) {
+    setTimeout(() => {
+      appendBubble('ai', quick.reply);
+      chatHistory.push({ role: 'assistant', content: quick.reply });
+      persistHistory();
+      setStatus('speaking', 'AIが話しています');
+      speak(quick.reply, () => setStatus('idle', '待機中'));
+    }, 400);
+    return;
+  }
+
+  setStatus('thinking', 'AIが考えています…');
+  callClaude(apiKey);
+}
+
+async function callClaude(apiKey) {
+  const today = new Date().toISOString().split('T')[0];
+
+  const system = `あなたは親切で温かみのある健康管理AIアシスタントです。
+ユーザーの体調・体重・睡眠・歩数などを自然な会話で記録し、アドバイスします。
+
+【重要】ユーザーが体重・睡眠・歩数・体調などの健康データに言及したとき、
+返答の末尾に必ず以下のJSONブロックを含めてください：
+
+\`\`\`health-data
+{"date":"${today}","weight":null,"sleep":null,"steps":null,"condition":null,"memo":""}
+\`\`\`
+
+- 言及された値だけ埋め、それ以外はnull
+- conditionは体調に応じて "良い" / "普通" / "しんどい" のいずれかを設定（体調に関する言及がない場合はnull）
+- memoには体調コメントや補足（40字以内）
+- 健康データがない場合はJSONブロック不要
+
+返答は日本語で150〜200字。親しみやすく、前向きなトーンで。`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-client-side-api-key-flag': 'true',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 600,
+        system,
+        messages: chatHistory.slice(-12),
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    const rawText = data.content[0].text;
+    console.log('[health-log] Claude raw response:', rawText);
+
+    // Extract & save health data
+    const m = rawText.match(/```health-data\r?\n([\s\S]*?)\r?\n```/);
+    console.log('[health-log] health-data block match:', m ? m[1] : 'NOT FOUND');
+    if (m) {
+      try {
+        const hd = JSON.parse(m[1].trim());
+        console.log('[health-log] parsed health data:', hd);
+        const hasData = ['weight','sleep','steps','condition','memo'].some(k => hd[k] !== null && hd[k] !== '');
+        console.log('[health-log] hasData:', hasData, '/ condition:', hd.condition);
+        if (hasData) {
+          saveHealthLog(hd);
+          console.log('[health-log] saved to localStorage. current logs:', getLogs());
+        }
+      } catch (parseErr) {
+        console.error('[health-log] JSON parse error:', parseErr, '/ raw block:', m[1]);
+      }
+    }
+
+    const display = rawText.replace(/```health-data[\s\S]*?```/g, '').trim();
+    appendBubble('ai', display);
+    chatHistory.push({ role: 'assistant', content: rawText });
+    persistHistory();
+
+    setStatus('speaking', 'AIが話しています');
+    speak(display, () => setStatus('idle', '待機中'));
+
+  } catch (e) {
+    const isCors = e.message === 'Load failed' || e.message === 'Failed to fetch' || e.message === 'NetworkError when attempting to fetch resource.';
+    if (isCors) {
+      appendBubble('ai', '⚠️ APIに接続できませんでした（Load failed）\n\nfile:// で開いているとブラウザのCORS制限でAPIが呼べません。\n⚙️ボタン → 設定画面に解決方法を表示しています。');
+      document.getElementById('corsWarning').style.display = 'block';
+      openApiModal();
+    } else {
+      appendBubble('ai', `⚠️ エラーが発生しました：${e.message}`);
+    }
+    setStatus('idle', '待機中');
+  }
+}
+
+// ══════════════════════════
+//  TTS
+// ══════════════════════════
+function speak(text, onEnd) {
+  if (!window.speechSynthesis) { onEnd?.(); return; }
+  speechSynthesis.cancel();
+
+  const doSpeak = () => {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang  = 'ja-JP';
+    u.rate  = 1.0;
+    u.pitch = 1.05;
+    const jaVoice = speechSynthesis.getVoices().find(v => v.lang.startsWith('ja'));
+    if (jaVoice) u.voice = jaVoice;
+    u.onend  = () => onEnd?.();
+    u.onerror = () => onEnd?.();
+    speechSynthesis.speak(u);
+  };
+
+  if (speechSynthesis.getVoices().length === 0) {
+    speechSynthesis.addEventListener('voiceschanged', () => doSpeak(), { once: true });
+  } else {
+    doSpeak();
+  }
+}
+
+// ══════════════════════════
+//  UI helpers
+// ══════════════════════════
+function appendBubble(role, text) {
+  const container = document.getElementById('chatMessages');
+  const wrap = document.createElement('div');
+  wrap.className = `msg-wrap ${role}`;
+  if (role === 'ai') {
+    wrap.innerHTML = `
+      <div class="msg-label">AIアシスタント</div>
+      <div class="msg-inner">
+        <span class="ai-avatar">🐕‍🦺</span>
+        <div class="bubble">${escHtml(text)}</div>
+      </div>
+    `;
+  } else {
+    wrap.innerHTML = `
+      <div class="msg-label">あなた</div>
+      <div class="bubble">${escHtml(text)}</div>
+    `;
+  }
+  container.appendChild(wrap);
+  container.scrollTop = container.scrollHeight;
+}
+
+let toastTimer = null;
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+function setStatus(state, text) {
+  const dot = document.getElementById('statusDot');
+  dot.className = 'dot' + (state !== 'idle' ? ' ' + state : '');
+  document.getElementById('statusText').textContent = text;
+}
+
+// ══════════════════════════
+//  Health Records
+// ══════════════════════════
+function getLogs() {
+  return JSON.parse(localStorage.getItem(KEY_LOGS) || '[]');
+}
+
+function saveHealthLog(data) {
+  const logs = getLogs();
+  const idx = logs.findIndex(l => l.date === data.date);
+  if (idx >= 0) {
+    ['weight','sleep','steps','condition','memo'].forEach(k => {
+      if (data[k] !== null && data[k] !== '') logs[idx][k] = data[k];
+    });
+  } else {
+    logs.push(data);
+  }
+  localStorage.setItem(KEY_LOGS, JSON.stringify(logs));
+}
+
+function renderRecords() {
+  const logs = getLogs().sort((a, b) => b.date.localeCompare(a.date));
+  const el = document.getElementById('recordsContainer');
+  if (logs.length === 0) {
+    el.innerHTML = '<div class="empty-state">まだ記録がありません<br>チャットで体重や睡眠について話しかけると<br>自動で記録されます</div>';
+    return;
+  }
+  const condClass = { '良い': 'cond-good', '普通': 'cond-normal', 'しんどい': 'cond-bad' };
+  const condLabel = { '良い': '😊 良い', '普通': '😐 普通', 'しんどい': '😔 しんどい' };
+  el.innerHTML = logs.map(log => `
+    <div class="record-card${log.condition && condClass[log.condition] ? ' ' + condClass[log.condition] : ''}">
+      <div class="record-date">${fmtDate(log.date)}</div>
+      <div class="metrics-row">
+        ${log.condition && condLabel[log.condition] ? `<span class="chip">${condLabel[log.condition]}</span>` : ''}
+        ${log.weight ? `<span class="chip">⚖️ ${log.weight} kg</span>` : ''}
+        ${log.sleep  ? `<span class="chip">😴 ${log.sleep} h</span>` : ''}
+        ${log.steps  ? `<span class="chip">👟 ${Number(log.steps).toLocaleString()} 歩</span>` : ''}
+      </div>
+      ${log.memo ? `<div class="record-memo">${escHtml(log.memo)}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+function clearAllRecords() {
+  if (!confirm('すべての記録を削除しますか？')) return;
+  localStorage.removeItem(KEY_LOGS);
+  renderRecords();
+}
+
+function fmtDate(d) {
+  return new Date(d + 'T12:00:00').toLocaleDateString('ja-JP', {
+    year:'numeric', month:'long', day:'numeric', weekday:'short'
+  });
+}
+
+// ══════════════════════════
+//  Analysis
+// ══════════════════════════
+const ANALYSIS_QUESTIONS = [
+  { icon: '📅', label: '今週どう？',       q: '今週（直近7日）の体調・睡眠・歩数の傾向を分析して。' },
+  { icon: '📆', label: '先月と比べて？',   q: '先月と今月を比べて体調や数値に変化はある？' },
+  { icon: '🤕', label: '頭痛が多い日は？', q: 'メモに「頭痛」が含まれる日を曜日・パターンで分析して。' },
+  { icon: '⚖️', label: '体重の推移は？',  q: '体重の増減傾向を分析して。気になる変化があれば指摘して。' },
+  { icon: '😴', label: '睡眠の傾向は？',  q: '睡眠時間の傾向を分析して。短い日や長い日のパターンはある？' },
+  { icon: '😔', label: 'しんどい日は？',  q: 'しんどいと記録されている日のパターンを分析して。曜日・前日睡眠との関係は？' },
+];
+
+function chatAnalysis(q) {
+  const btn = document.querySelector('.tab-btn[data-tab="analysis"]');
+  switchTab(btn);
+  runAnalysis(q);
+}
+
+function renderAnalysisBtns() {
+  const el = document.getElementById('analysisBtns');
+  el.innerHTML = ANALYSIS_QUESTIONS.map(item => `
+    <button class="analysis-btn" onclick="runAnalysis(${JSON.stringify(item.q)})">
+      <span class="btn-icon">${item.icon}</span>${item.label}
+    </button>
+  `).join('');
+}
+
+function sendCustomAnalysis() {
+  const el = document.getElementById('analysisInput');
+  const q = el.value.trim();
+  if (!q) return;
+  el.value = '';
+  runAnalysis(q);
+}
+
+async function runAnalysis(question) {
+  const apiKey = localStorage.getItem(KEY_API);
+  if (!apiKey) { openApiModal(); return; }
+
+  const logs = getLogs().sort((a, b) => a.date.localeCompare(b.date));
+  if (logs.length === 0) {
+    showAnalysisResult(question, 'まだ記録がありません。チャットタブで体調や体重などを話しかけると自動で記録されます。');
+    return;
+  }
+
+  showAnalysisLoading(question);
+
+  const today = new Date().toISOString().split('T')[0];
+  const logsText = logs.map(l => {
+    const d = new Date(l.date + 'T12:00:00');
+    const weekday = ['日','月','火','水','木','金','土'][d.getDay()];
+    const parts = [`${l.date}(${weekday})`];
+    if (l.condition) parts.push(`体調:${l.condition}`);
+    if (l.weight)    parts.push(`体重:${l.weight}kg`);
+    if (l.sleep)     parts.push(`睡眠:${l.sleep}h`);
+    if (l.steps)     parts.push(`歩数:${Number(l.steps).toLocaleString()}歩`);
+    if (l.memo)      parts.push(`メモ:${l.memo}`);
+    return parts.join(' ');
+  }).join('\n');
+
+  const system = `あなたは健康データを分析するAIアシスタントです。
+今日：${today}
+ユーザーの健康ログを元に、具体的で実用的な気づきを日本語で提供します。
+・箇条書きを使い、250字以内で簡潔に
+・具体的な数値・曜日・パターンを挙げる
+・health-dataブロックは出力しない`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-client-side-api-key-flag': 'true',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 600,
+        system,
+        messages: [{ role: 'user', content: `【健康ログ】\n${logsText}\n\n【質問】${question}` }],
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    showAnalysisResult(question, data.content[0].text);
+  } catch (e) {
+    showAnalysisResult(question, `⚠️ エラー：${e.message}`);
+  }
+}
+
+function showAnalysisLoading(question) {
+  document.getElementById('analysisResult').innerHTML = `
+    <div class="analysis-result-q">💬 ${escHtml(question)}</div>
+    <div class="analysis-loading"><span class="dot thinking"></span>分析中…</div>
+  `;
+}
+
+function showAnalysisResult(question, text) {
+  document.getElementById('analysisResult').innerHTML = `
+    <div class="analysis-result-q">💬 ${escHtml(question)}</div>
+    <div class="analysis-result-text">${escHtml(text)}</div>
+  `;
+}
+
+// ══════════════════════════
+//  Chat history persistence
+// ══════════════════════════
+function persistHistory() {
+  localStorage.setItem(KEY_HIST, JSON.stringify(chatHistory.slice(-20)));
+}
+
+function loadAndRenderHistory() {
+  chatHistory = JSON.parse(localStorage.getItem(KEY_HIST) || '[]');
+  if (chatHistory.length === 0) return;
+  const container = document.getElementById('chatMessages');
+  container.innerHTML = '';
+  chatHistory.forEach(msg => {
+    const display = msg.content.replace(/```health-data[\s\S]*?```/g,'').trim();
+    appendBubble(msg.role === 'user' ? 'user' : 'ai', display);
+  });
+}
+</script>
+</body>
+</html>
