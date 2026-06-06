@@ -143,6 +143,8 @@
       display: flex; flex-direction: column;
       align-items: center; gap: 10px;
       flex-shrink: 0;
+      overflow-y: auto;
+      max-height: 65dvh;
     }
     .transcript-box {
       width: 100%;
@@ -306,6 +308,41 @@
       background: none; color: var(--text-light);
       border: 1px solid var(--border); border-radius: 6px;
       padding: 5px 10px; font-size: 0.8rem; cursor: pointer;
+    }
+    .med-gcal-btn {
+      background: none; border: none;
+      font-size: 0.82rem; cursor: pointer;
+      padding: 2px 4px; border-radius: 4px;
+      color: var(--text-light); line-height: 1;
+      transition: background 0.15s, color 0.15s;
+      flex-shrink: 0;
+    }
+    .med-gcal-btn:hover { background: rgba(66,133,244,0.12); color: #4285f4; }
+    .gcal-footer {
+      display: block;
+      border-top: 1px solid var(--border);
+      padding-top: 8px; margin-top: 2px;
+      width: 100%;
+    }
+    .gcal-footer-label {
+      font-size: 0.72rem; color: var(--text-light); margin-bottom: 6px;
+    }
+    .gcal-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+    .gcal-slot-btn {
+      font-size: 0.75rem; cursor: pointer;
+      background: #e8f0fe; color: #4285f4;
+      border: 1px solid #c5d5f7; border-radius: 14px;
+      padding: 4px 12px;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+    }
+    .gcal-slot-btn:hover:not(:disabled) { background: #d2e3fc; }
+    .gcal-slot-btn:disabled {
+      background: #f0f0f0;
+      color: #aaa;
+      border-color: #ddd;
+      cursor: default;
+      pointer-events: none;
     }
 
     /* ── Records Tab ── */
@@ -608,23 +645,33 @@
           <div class="med-time-editor-header" id="medTimeEditorLabel"></div>
           <div class="med-slot-row">
             <span class="med-slot-label">☀️ 朝</span>
-            <input class="med-time-input" type="time" id="medTime朝">
+            <input class="med-time-input" type="time" id="medTime朝" oninput="updateGcalBtns()">
             <button class="med-slot-clear" onclick="clearSlot('朝')" title="クリア">×</button>
           </div>
           <div class="med-slot-row">
             <span class="med-slot-label">🌤 昼</span>
-            <input class="med-time-input" type="time" id="medTime昼">
+            <input class="med-time-input" type="time" id="medTime昼" oninput="updateGcalBtns()">
             <button class="med-slot-clear" onclick="clearSlot('昼')" title="クリア">×</button>
           </div>
           <div class="med-slot-row">
             <span class="med-slot-label">🌙 夜</span>
-            <input class="med-time-input" type="time" id="medTime夜">
+            <input class="med-time-input" type="time" id="medTime夜" oninput="updateGcalBtns()">
             <button class="med-slot-clear" onclick="clearSlot('夜')" title="クリア">×</button>
           </div>
           <div class="med-time-editor-footer">
             <button class="med-time-close" onclick="closeTimeEditor()">閉じる</button>
             <button class="med-time-save" onclick="saveMedTimes()">保存</button>
           </div>
+        </div>
+      </div>
+
+      <!-- Google Calendar section (controlled by JS, outside time editor) -->
+      <div id="gcalSection" style="display:none; width:100%; background:var(--bg-card); border:1px solid #c5d5f7; border-radius:10px; padding:10px 12px;">
+        <div style="font-size:0.72rem; color:var(--text-light); margin-bottom:7px;">📅 Googleカレンダーに追加（毎日繰り返し）</div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button class="gcal-slot-btn" id="gcalBtn朝" onclick="addToGoogleCalendar('朝')">☀️ 朝</button>
+          <button class="gcal-slot-btn" id="gcalBtn昼" onclick="addToGoogleCalendar('昼')">🌤 昼</button>
+          <button class="gcal-slot-btn" id="gcalBtn夜" onclick="addToGoogleCalendar('夜')">🌙 夜</button>
         </div>
       </div>
 
@@ -947,10 +994,13 @@ function openTimeEditor(idx) {
   document.getElementById('medTime昼').value = med.times.昼 || '';
   document.getElementById('medTime夜').value = med.times.夜 || '';
   document.getElementById('medTimeEditor').classList.add('open');
+  document.getElementById('gcalSection').style.display = 'block';
+  updateGcalBtns();
 }
 
 function clearSlot(label) {
   document.getElementById(`medTime${label}`).value = '';
+  updateGcalBtns();
 }
 
 function saveMedTimes() {
@@ -970,6 +1020,45 @@ function saveMedTimes() {
 function closeTimeEditor() {
   editingMedIdx = null;
   document.getElementById('medTimeEditor').classList.remove('open');
+  document.getElementById('gcalSection').style.display = 'none';
+}
+
+function updateGcalBtns() {
+  ['朝','昼','夜'].forEach(slot => {
+    const btn = document.getElementById(`gcalBtn${slot}`);
+    if (btn) btn.disabled = !document.getElementById(`medTime${slot}`).value;
+  });
+}
+
+function addToGoogleCalendar(slot) {
+  if (editingMedIdx === null) return;
+  const time = document.getElementById(`medTime${slot}`).value;
+  if (!time) { showToast(`${slot}の時間を先に設定してください`); return; }
+
+  const med = getMeds()[editingMedIdx];
+
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const ymd = tomorrow.toISOString().split('T')[0].replace(/-/g,'');
+
+  const [hh, mm] = time.split(':').map(Number);
+  const endMM = (mm + 15) % 60;
+  const endHH = mm + 15 >= 60 ? hh + 1 : hh;
+  const startT = `${String(hh).padStart(2,'0')}${String(mm).padStart(2,'0')}00`;
+  const endT   = `${String(endHH).padStart(2,'0')}${String(endMM).padStart(2,'0')}00`;
+
+  const slotIcon = { '朝':'☀️', '昼':'🌤', '夜':'🌙' }[slot] || '';
+
+  const params = new URLSearchParams({
+    action:  'TEMPLATE',
+    text:    `💊 ${med.name}を飲む時間です`,
+    dates:   `${ymd}T${startT}/${ymd}T${endT}`,
+    recur:   'RRULE:FREQ=DAILY',
+    details: `${slotIcon}${slot}の服薬リマインダーです（健康ログアプリより）`,
+  });
+
+  window.open(`https://calendar.google.com/calendar/render?${params}`, '_blank');
+  showToast(`Googleカレンダーを開きました 📅`);
 }
 
 // ══════════════════════════
