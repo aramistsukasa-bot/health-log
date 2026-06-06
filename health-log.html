@@ -432,6 +432,65 @@
       font-size: 0.82rem; color: var(--text-light); padding: 16px 0;
     }
 
+    /* ── Calendar ── */
+    .cal-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 10px;
+    }
+    .cal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .cal-nav {
+      background: none; border: 1px solid var(--border);
+      border-radius: 6px; padding: 4px 12px;
+      cursor: pointer; color: var(--text); font-size: 0.8rem;
+      transition: background 0.15s;
+    }
+    .cal-nav:hover { background: var(--beige); }
+    .cal-title { font-size: 0.9rem; font-weight: 600; color: var(--blue-dark); }
+    .cal-weekdays {
+      display: grid; grid-template-columns: repeat(7, 1fr);
+      text-align: center;
+      font-size: 0.68rem; color: var(--text-light);
+      margin-bottom: 4px; padding: 0 1px;
+    }
+    .cal-weekdays span:first-child { color: #c05050; }
+    .cal-weekdays span:last-child  { color: var(--blue-dark); }
+    .cal-grid {
+      display: grid; grid-template-columns: repeat(7, 1fr);
+      gap: 3px; padding: 0 1px;
+    }
+    .cal-day {
+      aspect-ratio: 1;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 50%; font-size: 0.78rem; color: var(--text);
+    }
+    .cal-day.other-month { color: var(--text-light); opacity: 0.35; }
+    .cal-day.cal-green { background: #5baa6e; color: #fff; font-weight: 600; }
+    .cal-day.cal-red   { background: #d95050; color: #fff; font-weight: 600; }
+    .cal-day.cal-today { background: var(--blue); color: #fff; font-weight: 700; }
+    .cal-legend {
+      display: flex; gap: 14px; justify-content: center;
+      margin-top: 10px; font-size: 0.7rem; color: var(--text-light);
+    }
+    .cal-legend-item { display: flex; align-items: center; gap: 4px; }
+    .cal-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .cal-dot-green { background: #5baa6e; }
+    .cal-dot-red   { background: #d95050; }
+    .cal-dot-blue  { background: var(--blue); }
+
+    /* ── CSV button ── */
+    .csv-btn {
+      font-size: 0.75rem; color: var(--blue-dark);
+      background: none; border: 1px solid var(--blue-light);
+      border-radius: 6px; padding: 4px 10px; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .csv-btn:hover { background: var(--beige); }
+
     /* ── Toast ── */
     .toast {
       position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
@@ -587,7 +646,10 @@
   <div class="tab-panel" id="tab-records">
     <div class="records-header">
       <span class="records-title">健康記録</span>
-      <button class="clear-btn" onclick="clearAllRecords()">全削除</button>
+      <div style="display:flex;gap:8px;">
+        <button class="csv-btn" onclick="exportCSV()">⬇ CSVでエクスポート</button>
+        <button class="clear-btn" onclick="clearAllRecords()">全削除</button>
+      </div>
     </div>
     <div class="records-scroll" id="recordsContainer"></div>
   </div>
@@ -595,6 +657,25 @@
   <!-- Analysis Tab -->
   <div class="tab-panel" id="tab-analysis">
     <div class="analysis-body">
+      <div>
+        <div class="analysis-section-label">📅 服薬カレンダー</div>
+        <div class="cal-card">
+          <div class="cal-header">
+            <button class="cal-nav" onclick="shiftMonth(-1)">&#9664;</button>
+            <span class="cal-title" id="calTitle"></span>
+            <button class="cal-nav" onclick="shiftMonth(1)">&#9654;</button>
+          </div>
+          <div class="cal-weekdays">
+            <span>日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span>土</span>
+          </div>
+          <div class="cal-grid" id="calGrid"></div>
+          <div class="cal-legend">
+            <span class="cal-legend-item"><span class="cal-dot cal-dot-green"></span>服薬済み</span>
+            <span class="cal-legend-item"><span class="cal-dot cal-dot-red"></span>飲み忘れ</span>
+            <span class="cal-legend-item"><span class="cal-dot cal-dot-blue"></span>今日</span>
+          </div>
+        </div>
+      </div>
       <div>
         <div class="analysis-section-label">よく使う質問</div>
         <div class="analysis-btns" id="analysisBtns"></div>
@@ -637,6 +718,7 @@ window.addEventListener('load', () => {
   renderAnalysisBtns();
   requestNotificationPermission();
   startReminderCheck();
+  initCalendar();
 });
 
 // ══════════════════════════
@@ -686,6 +768,7 @@ function switchTab(btn) {
   btn.classList.add('active');
   document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
   if (btn.dataset.tab === 'records') renderRecords();
+  if (btn.dataset.tab === 'analysis') renderCalendar();
 }
 
 // ══════════════════════════
@@ -841,7 +924,11 @@ function deleteMedBtn(btn) {
 }
 
 function takeMedBtn(btn) {
-  sendMessage(`${btn.dataset.med}を飲んだ`);
+  const name = btn.dataset.med;
+  const now = new Date();
+  const hhmm = now.toTimeString().slice(0, 5);
+  logMedTaken(name, hhmm);
+  sendMessage(`${name}を飲んだ`);
 }
 
 function escAttr(s) {
@@ -1271,6 +1358,139 @@ function showAnalysisResult(question, text) {
     <div class="analysis-result-q">💬 ${escHtml(question)}</div>
     <div class="analysis-result-text">${escHtml(text)}</div>
   `;
+}
+
+// ══════════════════════════
+//  Med Log (taken history)
+// ══════════════════════════
+const KEY_MED_LOG = 'hlai_med_log';
+
+function getMedLog() {
+  return JSON.parse(localStorage.getItem(KEY_MED_LOG) || '[]');
+}
+
+function logMedTaken(name, time) {
+  const log = getMedLog();
+  const date = new Date().toISOString().split('T')[0];
+  log.push({ date, name, time });
+  localStorage.setItem(KEY_MED_LOG, JSON.stringify(log));
+}
+
+// ══════════════════════════
+//  Calendar
+// ══════════════════════════
+let calYear, calMonth;
+
+function initCalendar() {
+  const now = new Date();
+  calYear  = now.getFullYear();
+  calMonth = now.getMonth();
+  renderCalendar();
+}
+
+function shiftMonth(delta) {
+  calMonth += delta;
+  if (calMonth > 11) { calMonth = 0; calYear++; }
+  if (calMonth < 0)  { calMonth = 11; calYear--; }
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const today    = new Date().toISOString().split('T')[0];
+  const takenSet = new Set(getMedLog().map(e => e.date));
+  const hasMeds  = getMeds().length > 0;
+
+  document.getElementById('calTitle').textContent = `${calYear}年 ${calMonth + 1}月`;
+
+  const firstDow   = new Date(calYear, calMonth, 1).getDay();
+  const daysInMon  = new Date(calYear, calMonth + 1, 0).getDate();
+  const prevLast   = new Date(calYear, calMonth, 0).getDate();
+
+  let html = '';
+
+  for (let i = firstDow - 1; i >= 0; i--) {
+    html += `<div class="cal-day other-month">${prevLast - i}</div>`;
+  }
+
+  for (let d = 1; d <= daysInMon; d++) {
+    const ds = `${calYear}-${String(calMonth + 1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    let cls = 'cal-day';
+    if (ds === today) {
+      cls += ' cal-today';
+    } else if (ds < today && hasMeds) {
+      cls += takenSet.has(ds) ? ' cal-green' : ' cal-red';
+    }
+    html += `<div class="${cls}">${d}</div>`;
+  }
+
+  const total = firstDow + daysInMon;
+  const pad   = total % 7 === 0 ? 0 : 7 - (total % 7);
+  for (let d = 1; d <= pad; d++) {
+    html += `<div class="cal-day other-month">${d}</div>`;
+  }
+
+  document.getElementById('calGrid').innerHTML = html;
+}
+
+// ══════════════════════════
+//  CSV Export
+// ══════════════════════════
+function exportCSV() {
+  const medLog = getMedLog();
+  const meds   = getMeds();
+
+  if (medLog.length === 0 && meds.every(m => !Object.values(m.times).some(t => t))) {
+    showToast('エクスポートするデータがありません');
+    return;
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+
+  let startDate = today;
+  if (medLog.length > 0) {
+    startDate = medLog.map(e => e.date).sort()[0];
+  } else {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    startDate = d.toISOString().split('T')[0];
+  }
+
+  const rows = [['日付', '薬の名前', '服用時間', '服用状態']];
+
+  const cur = new Date(startDate + 'T12:00:00');
+  const end = new Date(today    + 'T12:00:00');
+
+  while (cur <= end) {
+    const ds      = cur.toISOString().split('T')[0];
+    const taken   = medLog.filter(e => e.date === ds);
+    const takenNames = new Set(taken.map(e => e.name));
+
+    taken.forEach(e => rows.push([ds, e.name, e.time, '服用済み']));
+
+    meds.forEach(med => {
+      if (takenNames.has(med.name)) return;
+      [['朝', med.times.朝], ['昼', med.times.昼], ['夜', med.times.夜]]
+        .filter(([, t]) => t)
+        .forEach(([, t]) => rows.push([ds, med.name, t, '未服用']));
+    });
+
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  if (rows.length === 1) {
+    showToast('エクスポートするデータがありません');
+    return;
+  }
+
+  const csv  = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = `服薬記録_${today}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('CSVをダウンロードしました ✓');
 }
 
 // ══════════════════════════
