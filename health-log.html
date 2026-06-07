@@ -49,6 +49,7 @@
       transition: background 0.15s, color 0.15s;
     }
     .icon-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+    .icon-btn.gcal-linked { color: #90caf9; }
 
     /* ── Tabs ── */
     .tabs {
@@ -599,7 +600,10 @@
 <!-- Header -->
 <header>
   <h1>🐕‍🦺 健康ログ AI</h1>
-  <button class="icon-btn" title="APIキー設定" onclick="openApiModal()">⚙️</button>
+  <div style="display:flex;gap:2px;">
+    <button class="icon-btn" id="gcalLoginBtn" title="Googleカレンダーと連携" onclick="gcalLogin()">📅</button>
+    <button class="icon-btn" title="APIキー設定" onclick="openApiModal()">⚙️</button>
+  </div>
 </header>
 
 <!-- Tabs -->
@@ -972,9 +976,13 @@ function deleteMedBtn(btn) {
 
 function takeMedBtn(btn) {
   const name = btn.dataset.med;
-  const now = new Date();
+  const now  = new Date();
+  const date = now.toISOString().split('T')[0];
   const hhmm = now.toTimeString().slice(0, 5);
   logMedTaken(name, hhmm);
+  if (gcalAccessToken) {
+    createCalendarEvent({ name, time: hhmm, date });
+  }
   sendMessage(`${name}を飲んだ`);
 }
 
@@ -1583,6 +1591,108 @@ function exportCSV() {
 }
 
 // ══════════════════════════
+//  Google Calendar API
+// ══════════════════════════
+const GCAL_CLIENT_ID = '497692667598-j2fhkiebj55m0ukjfvohtuegkt77d253.apps.googleusercontent.com';
+const GCAL_SCOPE     = 'https://www.googleapis.com/auth/calendar.events';
+const KEY_GCAL_AUTH  = 'hlai_gcal_auth';
+
+let gcalTokenClient  = null;
+let gcalAccessToken  = null;
+
+function initGoogleCalendarAuth() {
+  if (!window.google?.accounts?.oauth2) return;
+  gcalTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GCAL_CLIENT_ID,
+    scope:     GCAL_SCOPE,
+    callback:  onGcalToken,
+  });
+  // サイレント再取得（以前に許可済みの場合）
+  if (localStorage.getItem(KEY_GCAL_AUTH) === 'granted') {
+    gcalTokenClient.requestAccessToken({ prompt: '' });
+  }
+}
+
+function onGcalToken(response) {
+  if (response.error) {
+    gcalAccessToken = null;
+    localStorage.removeItem(KEY_GCAL_AUTH);
+    updateGcalLoginBtn();
+    if (response.error !== 'access_denied') showToast('Googleログインに失敗しました');
+    return;
+  }
+  gcalAccessToken = response.access_token;
+  localStorage.setItem(KEY_GCAL_AUTH, 'granted');
+  updateGcalLoginBtn();
+  showToast('Googleカレンダーと連携しました ✓');
+}
+
+function gcalLogin() {
+  if (!gcalTokenClient) { showToast('Google APIを読み込み中です'); return; }
+  gcalTokenClient.requestAccessToken({ prompt: 'consent' });
+}
+
+function gcalLogout() {
+  if (gcalAccessToken) {
+    google.accounts.oauth2.revoke(gcalAccessToken, () => {});
+    gcalAccessToken = null;
+  }
+  localStorage.removeItem(KEY_GCAL_AUTH);
+  updateGcalLoginBtn();
+  showToast('Googleカレンダーの連携を解除しました');
+}
+
+function updateGcalLoginBtn() {
+  const btn = document.getElementById('gcalLoginBtn');
+  if (!btn) return;
+  if (gcalAccessToken) {
+    btn.title   = 'Googleカレンダー連携中（タップで解除）';
+    btn.onclick = gcalLogout;
+    btn.classList.add('gcal-linked');
+    btn.textContent = '📅✓';
+  } else {
+    btn.title   = 'Googleカレンダーと連携';
+    btn.onclick = gcalLogin;
+    btn.classList.remove('gcal-linked');
+    btn.textContent = '📅';
+  }
+}
+
+async function createCalendarEvent({ name, time, date }) {
+  if (!gcalAccessToken) return;
+  const tz    = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const start = new Date(`${date}T${time}:00`);
+  const end   = new Date(start.getTime() + 15 * 60 * 1000);
+  try {
+    const res = await fetch(
+      'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+      {
+        method: 'POST',
+        headers: {
+          Authorization:  `Bearer ${gcalAccessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          summary: `💊 ${name}を服用`,
+          start: { dateTime: start.toISOString(), timeZone: tz },
+          end:   { dateTime: end.toISOString(),   timeZone: tz },
+        }),
+      }
+    );
+    if (res.status === 401) {
+      gcalAccessToken = null;
+      updateGcalLoginBtn();
+      showToast('Googleセッション切れ — 📅から再ログインしてください');
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    showToast('Googleカレンダーに記録しました 📅');
+  } catch (e) {
+    console.error('[gcal]', e);
+  }
+}
+
+// ══════════════════════════
 //  Chat history persistence
 // ══════════════════════════
 function persistHistory() {
@@ -1600,5 +1710,6 @@ function loadAndRenderHistory() {
   });
 }
 </script>
+<script async src="https://accounts.google.com/gsi/client" onload="initGoogleCalendarAuth()"></script>
 </body>
 </html>
