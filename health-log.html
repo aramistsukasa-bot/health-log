@@ -982,6 +982,10 @@ function takeMedBtn(btn) {
   logMedTaken(name, hhmm);
   if (gcalAccessToken) {
     createCalendarEvent({ name, time: hhmm, date });
+  } else if (gcalTokenClient) {
+    // チップタップはユーザー操作なのでここでログインを起動できる
+    gcalPendingEvent = { name, time: hhmm, date };
+    gcalTokenClient.requestAccessToken({ prompt: 'select_account' });
   }
   sendMessage(`${name}を飲んだ`);
 }
@@ -1599,6 +1603,7 @@ const KEY_GCAL_AUTH  = 'hlai_gcal_auth';
 
 let gcalTokenClient  = null;
 let gcalAccessToken  = null;
+let gcalPendingEvent = null;
 
 function initGoogleCalendarAuth() {
   if (!window.google?.accounts?.oauth2) return;
@@ -1607,15 +1612,13 @@ function initGoogleCalendarAuth() {
     scope:     GCAL_SCOPE,
     callback:  onGcalToken,
   });
-  // サイレント再取得（以前に許可済みの場合）
-  if (localStorage.getItem(KEY_GCAL_AUTH) === 'granted') {
-    gcalTokenClient.requestAccessToken({ prompt: '' });
-  }
+  updateGcalLoginBtn();
 }
 
 function onGcalToken(response) {
   if (response.error) {
-    gcalAccessToken = null;
+    gcalAccessToken  = null;
+    gcalPendingEvent = null;
     localStorage.removeItem(KEY_GCAL_AUTH);
     updateGcalLoginBtn();
     if (response.error !== 'access_denied') showToast('Googleログインに失敗しました');
@@ -1624,12 +1627,17 @@ function onGcalToken(response) {
   gcalAccessToken = response.access_token;
   localStorage.setItem(KEY_GCAL_AUTH, 'granted');
   updateGcalLoginBtn();
-  showToast('Googleカレンダーと連携しました ✓');
+  if (gcalPendingEvent) {
+    createCalendarEvent(gcalPendingEvent);
+    gcalPendingEvent = null;
+  } else {
+    showToast('Googleカレンダーと連携しました ✓');
+  }
 }
 
 function gcalLogin() {
   if (!gcalTokenClient) { showToast('Google APIを読み込み中です'); return; }
-  gcalTokenClient.requestAccessToken({ prompt: 'consent' });
+  gcalTokenClient.requestAccessToken({ prompt: 'select_account' });
 }
 
 function gcalLogout() {
@@ -1681,12 +1689,13 @@ async function createCalendarEvent({ name, time, date }) {
     );
     if (res.status === 401) {
       gcalAccessToken = null;
+      localStorage.removeItem(KEY_GCAL_AUTH);
       updateGcalLoginBtn();
-      showToast('Googleセッション切れ — 📅から再ログインしてください');
+      showToast('Googleセッション切れ — もう一度タップで再ログイン');
       return;
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    showToast('Googleカレンダーに記録しました 📅');
+    showToast('カレンダーに追加しました ✓');
   } catch (e) {
     console.error('[gcal]', e);
   }
