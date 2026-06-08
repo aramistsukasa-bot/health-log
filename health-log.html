@@ -1065,7 +1065,6 @@ function addToGoogleCalendar(slot) {
     action:  'TEMPLATE',
     text:    `💊 ${med.name}を飲む時間です`,
     dates:   `${ymd}T${startT}/${ymd}T${endT}`,
-    recur:   'RRULE:FREQ=DAILY',
     details: `${slotIcon}${slot}の服薬リマインダーです（健康ログアプリより）`,
   });
 
