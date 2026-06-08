@@ -1137,11 +1137,18 @@ function detectAndAddMedToCalendar(text) {
   const time = parseJapaneseTime(text) || now.toTimeString().slice(0, 5);
   for (const med of meds) {
     if (text.includes(med.name)) {
+      logMedTaken(med.name, time);
       if (gcalAccessToken) {
         createCalendarEvent({ name: med.name, time, date });
       } else if (gcalTokenClient) {
         gcalPendingEvent = { name: med.name, time, date };
-        showToast('💊 カレンダーに記録するには 📅 ボタンでログインしてください');
+        if (localStorage.getItem(KEY_GCAL_AUTH) === 'granted') {
+          // 過去に同意済み → ポップアップなしでサイレント再取得してそのままイベント登録
+          gcalSilentAuth = true;
+          gcalTokenClient.requestAccessToken({ prompt: '' });
+        } else {
+          showToast('💊 カレンダーに記録するには 📅 ボタンでログインしてください');
+        }
       }
       return;
     }
@@ -1637,6 +1644,7 @@ const KEY_GCAL_AUTH  = 'hlai_gcal_auth';
 let gcalTokenClient  = null;
 let gcalAccessToken  = null;
 let gcalPendingEvent = null;
+let gcalSilentAuth   = false;
 
 function initGoogleCalendarAuth() {
   if (!window.google?.accounts?.oauth2) return;
@@ -1645,16 +1653,23 @@ function initGoogleCalendarAuth() {
     scope:     GCAL_SCOPE,
     callback:  onGcalToken,
   });
+  // 以前に同意済みならポップアップなしでトークンを静かに回復
+  if (localStorage.getItem(KEY_GCAL_AUTH) === 'granted') {
+    gcalSilentAuth = true;
+    gcalTokenClient.requestAccessToken({ prompt: '' });
+  }
   updateGcalLoginBtn();
 }
 
 function onGcalToken(response) {
+  const wasSilent = gcalSilentAuth;
+  gcalSilentAuth = false;
   if (response.error) {
     gcalAccessToken  = null;
     gcalPendingEvent = null;
     localStorage.removeItem(KEY_GCAL_AUTH);
     updateGcalLoginBtn();
-    if (response.error !== 'access_denied') showToast('Googleログインに失敗しました');
+    if (response.error !== 'access_denied' && !wasSilent) showToast('Googleログインに失敗しました');
     return;
   }
   gcalAccessToken = response.access_token;
@@ -1663,7 +1678,7 @@ function onGcalToken(response) {
   if (gcalPendingEvent) {
     createCalendarEvent(gcalPendingEvent);
     gcalPendingEvent = null;
-  } else {
+  } else if (!wasSilent) {
     showToast('Googleカレンダーと連携しました ✓');
   }
 }
