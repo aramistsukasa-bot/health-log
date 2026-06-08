@@ -1136,18 +1136,21 @@ function tryAddMedToCalendar(text) {
   const now  = new Date();
   const date = now.toISOString().split('T')[0];
   const time = parseJapaneseTime(text) || now.toTimeString().slice(0, 5);
+  const found = [];
   for (const med of getMeds()) {
-    // 登録名そのまま、または末尾の用量（500mg・10錠など）を除いた名前で照合
     const base = med.name.replace(/[\d.]+\s*(mg|ml|g|μg|錠|カプセル|包)?$/i, '').trim();
     const matched = text.includes(med.name) || (base.length >= 2 && text.includes(base));
     if (!matched) continue;
     logMedTaken(med.name, time);
-    if (gcalAccessToken) {
-      createCalendarEvent({ name: med.name, time, date });
-    } else {
-      showToast('📅 Googleカレンダーに記録するにはログインしてください');
-    }
-    return;
+    found.push(med.name);
+  }
+  if (!found.length) return;
+  if (gcalAccessToken) {
+    // 複数薬は全部登録し、完了後にまとめてトースト1件
+    Promise.all(found.map(name => createCalendarEvent({ name, time, date }, false)))
+      .then(() => showToast(`カレンダーに追加しました ✓ (${found.join('・')})`));
+  } else {
+    showToast('📅 Googleカレンダーに記録するにはログインしてください');
   }
 }
 
@@ -1713,7 +1716,7 @@ function updateGcalLoginBtn() {
   }
 }
 
-async function createCalendarEvent({ name, time, date }) {
+async function createCalendarEvent({ name, time, date }, toast = true) {
   if (!gcalAccessToken) return;
   const tz    = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const start = new Date(`${date}T${time}:00`);
@@ -1735,8 +1738,8 @@ async function createCalendarEvent({ name, time, date }) {
       showToast('Googleセッション切れ — 📅 ボタンで再ログイン');
       return;
     }
-    if (res.ok) showToast('カレンダーに追加しました ✓');
-    else showToast(`カレンダー登録失敗 (${res.status})`);
+    if (!res.ok) showToast(`カレンダー登録失敗 (${res.status})`);
+    else if (toast) showToast('カレンダーに追加しました ✓');
   } catch (e) {
     console.error('[gcal]', e);
     showToast('カレンダー登録に失敗しました');
