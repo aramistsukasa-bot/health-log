@@ -987,7 +987,7 @@ function takeMedBtn(btn) {
     gcalPendingEvent = { name, time: hhmm, date };
     gcalTokenClient.requestAccessToken({ prompt: 'select_account' });
   }
-  sendMessage(`${name}を飲んだ`);
+  sendMessage(`${name}を飲んだ`, { skipCalendar: true });
 }
 
 function escAttr(s) {
@@ -1116,9 +1116,43 @@ const QUICK_REPLIES = [
   },
 ];
 
-function sendMessage(text) {
+function parseJapaneseTime(text) {
+  const ampm = /午前/.test(text) ? 'am' : /午後/.test(text) ? 'pm' : null;
+  const m = text.match(/(\d+)時((\d+)分|半)?/);
+  if (!m) return null;
+  let hh = parseInt(m[1], 10);
+  const mm = m[3] ? parseInt(m[3], 10) : m[2] === '半' ? 30 : 0;
+  if (ampm === 'pm' && hh < 12) hh += 12;
+  if (ampm === 'am' && hh === 12) hh = 0;
+  if (hh > 23 || mm > 59) return null;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+function detectAndAddMedToCalendar(text) {
+  const meds = getMeds();
+  if (!meds.length) return;
+  if (!/飲んだ|のんだ|服用/.test(text)) return;
+  const now  = new Date();
+  const date = now.toISOString().split('T')[0];
+  const time = parseJapaneseTime(text) || now.toTimeString().slice(0, 5);
+  for (const med of meds) {
+    if (text.includes(med.name)) {
+      if (gcalAccessToken) {
+        createCalendarEvent({ name: med.name, time, date });
+      } else if (gcalTokenClient) {
+        gcalPendingEvent = { name: med.name, time, date };
+        showToast('💊 カレンダーに記録するには 📅 ボタンでログインしてください');
+      }
+      return;
+    }
+  }
+}
+
+function sendMessage(text, { skipCalendar = false } = {}) {
   const apiKey = localStorage.getItem(KEY_API);
   if (!apiKey) { openApiModal(); return; }
+
+  if (!skipCalendar) detectAndAddMedToCalendar(text);
 
   appendBubble('user', text);
   chatHistory.push({ role: 'user', content: text });
