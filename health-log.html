@@ -956,6 +956,7 @@ function addMed() {
   if (meds.some(m => m.name === name)) { showToast('すでに登録されています'); return; }
   meds.push({ name, times: EMPTY_TIMES() });
   localStorage.setItem(KEY_MEDS, JSON.stringify(meds));
+  scheduleDriveSync();
   input.value = '';
   document.getElementById('addMedRow').classList.remove('open');
   renderMeds();
@@ -967,6 +968,7 @@ function deleteMedBtn(btn) {
   const meds = getMeds();
   meds.splice(idx, 1);
   localStorage.setItem(KEY_MEDS, JSON.stringify(meds));
+  scheduleDriveSync();
   if (editingMedIdx === idx) {
     editingMedIdx = null;
     document.getElementById('medTimeEditor').classList.remove('open');
@@ -1024,6 +1026,7 @@ function saveMedTimes() {
     夜: document.getElementById('medTime夜').value || null,
   };
   localStorage.setItem(KEY_MEDS, JSON.stringify(meds));
+  scheduleDriveSync();
   closeTimeEditor();
   renderMeds();
   showToast('服薬リマインダーを保存しました ⏰');
@@ -1372,6 +1375,7 @@ function saveHealthLog(data) {
     logs.push(data);
   }
   localStorage.setItem(KEY_LOGS, JSON.stringify(logs));
+  scheduleDriveSync();
 }
 
 function renderRecords() {
@@ -1532,6 +1536,7 @@ function logMedTaken(name, time) {
   const date = new Date().toISOString().split('T')[0];
   log.push({ date, name, time });
   localStorage.setItem(KEY_MED_LOG, JSON.stringify(log));
+  scheduleDriveSync();
 }
 
 // ══════════════════════════
@@ -1655,7 +1660,7 @@ function exportCSV() {
 //  Google Calendar API
 // ══════════════════════════
 const GCAL_CLIENT_ID = '497692667598-j2fhkiebj55m0ukjfvohtuegkt77d253.apps.googleusercontent.com';
-const GCAL_SCOPE     = 'https://www.googleapis.com/auth/calendar.events';
+const GCAL_SCOPE     = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.appdata';
 const KEY_GCAL_AUTH  = 'hlai_gcal_auth';
 
 let gcalTokenClient  = null;
@@ -1692,6 +1697,7 @@ function onGcalToken(response) {
   gcalAccessToken = response.access_token;
   localStorage.setItem(KEY_GCAL_AUTH, 'granted');
   updateGcalLoginBtn();
+  loadFromDrive(); // Drive から最新データを取得してUIを更新
   if (gcalPendingEvent) {
     createCalendarEvent(gcalPendingEvent);
     gcalPendingEvent = null;
@@ -1776,6 +1782,101 @@ async function createCalendarEvent({ name, time, date }) {
     console.error('[gcal] fetch error:', e);
     showToast(`カレンダー登録エラー: ${e.message}`);
   }
+}
+
+// ══════════════════════════
+//  Google Drive sync
+// ══════════════════════════
+const DRIVE_FILE = 'health-log-data.json';
+let driveFileId   = null;
+let driveSyncTimer = null;
+
+function scheduleDriveSync() {
+  clearTimeout(driveSyncTimer);
+  driveSyncTimer = setTimeout(syncToDrive, 1500);
+}
+
+async function driveReq(url, opts = {}) {
+  if (!gcalAccessToken) return null;
+  try {
+    const res = await fetch(url, {
+      ...opts,
+      headers: { Authorization: `Bearer ${gcalAccessToken}`, ...(opts.headers || {}) },
+    });
+    if (res.status === 401) { gcalAccessToken = null; updateGcalLoginBtn(); return null; }
+    return res;
+  } catch (e) { console.error('[drive]', e); return null; }
+}
+
+async function findDriveFile() {
+  const res = await driveReq(
+    `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name%3D'${DRIVE_FILE}'&fields=files(id)&pageSize=1`
+  );
+  if (!res?.ok) return null;
+  return (await res.json()).files?.[0]?.id || null;
+}
+
+async function writeDriveData(payload) {
+  const json = JSON.stringify(payload);
+  const b = 'hlboundary42';
+  const makeBody = (meta) =>
+    `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: application/json\r\n\r\n${json}\r\n--${b}--`;
+  const ct = `multipart/related; boundary="${b}"`;
+
+  if (!driveFileId) driveFileId = await findDriveFile();
+
+  if (driveFileId) {
+    await driveReq(
+      `https://www.googleapis.com/upload/drive/v3/files/${driveFileId}?uploadType=multipart`,
+      { method: 'PATCH', headers: { 'Content-Type': ct }, body: makeBody({}) }
+    );
+  } else {
+    const res = await driveReq(
+      `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart`,
+      { method: 'POST', headers: { 'Content-Type': ct },
+        body: makeBody({ name: DRIVE_FILE, parents: ['appDataFolder'] }) }
+    );
+    if (res?.ok) driveFileId = (await res.json()).id;
+  }
+}
+
+async function readDriveData() {
+  if (!driveFileId) driveFileId = await findDriveFile();
+  if (!driveFileId) return null;
+  const res = await driveReq(`https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`);
+  if (!res?.ok) return null;
+  try { return await res.json(); } catch { return null; }
+}
+
+async function syncToDrive() {
+  if (!gcalAccessToken) return;
+  try {
+    await writeDriveData({
+      meds:   JSON.parse(localStorage.getItem(KEY_MEDS)    || '[]'),
+      medLog: JSON.parse(localStorage.getItem(KEY_MED_LOG) || '[]'),
+      logs:   JSON.parse(localStorage.getItem(KEY_LOGS)    || '[]'),
+      syncedAt: new Date().toISOString(),
+    });
+    console.log('[drive] synced ✓');
+  } catch (e) { console.error('[drive] sync error:', e); }
+}
+
+async function loadFromDrive() {
+  if (!gcalAccessToken) return;
+  try {
+    const data = await readDriveData();
+    if (!data) { syncToDrive(); return; } // ドライブ未登録 → ローカルをアップロード
+    let changed = false;
+    if (Array.isArray(data.meds))   { localStorage.setItem(KEY_MEDS,    JSON.stringify(data.meds));   changed = true; }
+    if (Array.isArray(data.medLog)) { localStorage.setItem(KEY_MED_LOG, JSON.stringify(data.medLog)); changed = true; }
+    if (Array.isArray(data.logs))   { localStorage.setItem(KEY_LOGS,    JSON.stringify(data.logs));   changed = true; }
+    if (changed) {
+      renderMeds();
+      renderRecords();
+      renderCalendar();
+      showToast('☁️ Googleドライブからデータを同期しました');
+    }
+  } catch (e) { console.error('[drive] load error:', e); }
 }
 
 // ══════════════════════════
