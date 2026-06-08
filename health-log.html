@@ -1131,52 +1131,28 @@ function parseJapaneseTime(text) {
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
-function medNameMatchesText(text, medName) {
-  if (text.includes(medName)) return true;
-  // 用量サフィックス（500mg, 10錠 など）を除いた基本名でも照合する
-  const base = medName.replace(/[\d.]+\s*(mg|ml|μg|mcg|錠|カプセル|包|本|個|g|L|mL)?$/i, '').trim();
-  return base.length >= 2 && text.includes(base);
-}
-
-function detectAndAddMedToCalendar(text) {
-  console.log('[gcal-detect] called with:', text);
-  if (!/飲んだ|のんだ|服用/.test(text)) {
-    console.log('[gcal-detect] keyword not found, skip');
-    return;
-  }
-  const meds = getMeds();
-  console.log('[gcal-detect] meds:', meds.map(m => m.name), '/ gcalAccessToken:', !!gcalAccessToken);
-  if (!meds.length) return;
+function tryAddMedToCalendar(text) {
+  if (!/飲んだ|のんだ|服用/.test(text)) return;
   const now  = new Date();
   const date = now.toISOString().split('T')[0];
   const time = parseJapaneseTime(text) || now.toTimeString().slice(0, 5);
-  for (const med of meds) {
-    if (medNameMatchesText(text, med.name)) {
-      console.log('[gcal-detect] matched:', med.name, '/ time:', time);
-      logMedTaken(med.name, time);
-      if (gcalAccessToken) {
-        createCalendarEvent({ name: med.name, time, date });
-      } else if (gcalTokenClient) {
-        gcalPendingEvent = { name: med.name, time, date };
-        if (localStorage.getItem(KEY_GCAL_AUTH) === 'granted') {
-          gcalSilentAuth = true;
-          gcalTokenClient.requestAccessToken({ prompt: '' });
-          showToast('💊 Googleカレンダーに登録中…');
-        } else {
-          showToast('💊 カレンダーに記録するには 📅 ボタンでログインしてください');
-        }
-      } else {
-        showToast('💊 カレンダー連携: 画面上部の 📅 ボタンをタップしてください');
-      }
-      return;
+  for (const med of getMeds()) {
+    // 登録名そのまま、または末尾の用量（500mg・10錠など）を除いた名前で照合
+    const base = med.name.replace(/[\d.]+\s*(mg|ml|g|μg|錠|カプセル|包)?$/i, '').trim();
+    const matched = text.includes(med.name) || (base.length >= 2 && text.includes(base));
+    if (!matched) continue;
+    logMedTaken(med.name, time);
+    if (gcalAccessToken) {
+      createCalendarEvent({ name: med.name, time, date });
+    } else {
+      showToast('📅 Googleカレンダーに記録するにはログインしてください');
     }
+    return;
   }
-  console.log('[gcal-detect] no med name matched in text');
 }
 
 function sendMessage(text, { skipCalendar = false } = {}) {
-  // カレンダー登録はAPIキーと無関係に先に処理する
-  if (!skipCalendar) detectAndAddMedToCalendar(text);
+  if (!skipCalendar) tryAddMedToCalendar(text);
 
   const apiKey = localStorage.getItem(KEY_API);
   if (!apiKey) { openApiModal(); return; }
@@ -1738,49 +1714,32 @@ function updateGcalLoginBtn() {
 }
 
 async function createCalendarEvent({ name, time, date }) {
-  console.log('[gcal] createCalendarEvent called:', { name, time, date, hasToken: !!gcalAccessToken });
-  if (!gcalAccessToken) {
-    console.warn('[gcal] no access token, abort');
-    return;
-  }
+  if (!gcalAccessToken) return;
   const tz    = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const start = new Date(`${date}T${time}:00`);
   const end   = new Date(start.getTime() + 15 * 60 * 1000);
-  console.log('[gcal] posting event:', start.toISOString(), '→', end.toISOString(), 'tz:', tz);
   try {
-    const res = await fetch(
-      'https://www.googleapis.com/calendar/v3/calendars/primary/events',
-      {
-        method: 'POST',
-        headers: {
-          Authorization:  `Bearer ${gcalAccessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          summary: `💊 ${name}を服用`,
-          start: { dateTime: start.toISOString(), timeZone: tz },
-          end:   { dateTime: end.toISOString(),   timeZone: tz },
-        }),
-      }
-    );
-    console.log('[gcal] response status:', res.status);
+    const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${gcalAccessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        summary: `💊 ${name}を服用`,
+        start: { dateTime: start.toISOString(), timeZone: tz },
+        end:   { dateTime: end.toISOString(),   timeZone: tz },
+      }),
+    });
     if (res.status === 401) {
       gcalAccessToken = null;
       localStorage.removeItem(KEY_GCAL_AUTH);
       updateGcalLoginBtn();
-      showToast('Googleセッション切れ — 📅 ボタンで再ログインしてください');
+      showToast('Googleセッション切れ — 📅 ボタンで再ログイン');
       return;
     }
-    if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      console.error('[gcal] error body:', body);
-      showToast(`カレンダー登録失敗 (HTTP ${res.status}) — コンソールで詳細確認`);
-      return;
-    }
-    showToast('カレンダーに追加しました ✓');
+    if (res.ok) showToast('カレンダーに追加しました ✓');
+    else showToast(`カレンダー登録失敗 (${res.status})`);
   } catch (e) {
-    console.error('[gcal] fetch error:', e);
-    showToast(`カレンダー登録エラー: ${e.message}`);
+    console.error('[gcal]', e);
+    showToast('カレンダー登録に失敗しました');
   }
 }
 
