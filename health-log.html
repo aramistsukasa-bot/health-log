@@ -273,9 +273,6 @@
       border-radius: 50%;
     }
     .med-del:hover { color: #c05050; background: rgba(0,0,0,0.06); }
-    /* Default meds have no delete button — tighten right padding */
-    .med-chip-wrap.is-default .med-chip { padding-right: 28px; }
-    .med-chip-wrap.is-default .med-time-btn { right: 5px; }
     .meds-empty { font-size: 0.75rem; color: var(--beige-dark); align-self: center; }
     .med-time-editor {
       display: none; flex-direction: column; gap: 7px;
@@ -929,11 +926,12 @@ function sendText() {
 // ══════════════════════════
 //  Meds
 // ══════════════════════════
-const KEY_MEDS = 'hlai_meds';
+const KEY_MEDS        = 'hlai_meds';
+const KEY_DELETED_MEDS = 'hlai_deleted_meds';
 
 const EMPTY_TIMES = () => ({ 朝: null, 昼: null, 夜: null });
 
-// Default meds hard-coded in HTML — always visible in any browser
+// Default meds hard-coded in HTML
 const DEFAULT_MEDS = [
   'タリージェ', 'コペラ', 'アリナミン', '酸化マグネシウム',
   'プレマリン', 'デュファストン', 'オパルモン',
@@ -942,6 +940,10 @@ const DEFAULT_MEDS = [
 
 const DEFAULT_MED_NAMES = new Set(DEFAULT_MEDS.map(d => d.name));
 
+function getDeletedMedNames() {
+  return new Set(JSON.parse(localStorage.getItem(KEY_DELETED_MEDS) || '[]'));
+}
+
 // Normalize a raw stored entry to {name, times}
 function normalizeMed(m) {
   if (typeof m === 'string') return { name: m, times: EMPTY_TIMES() };
@@ -949,19 +951,23 @@ function normalizeMed(m) {
   return { name: m.name, times: { ...EMPTY_TIMES(), ...m.times } };
 }
 
-// Returns [defaults (with any stored times applied), ...user-added meds]
+// Returns [non-deleted defaults (with any stored times applied), ...user-added meds]
 function getMeds() {
-  const stored = JSON.parse(localStorage.getItem(KEY_MEDS) || '[]').map(normalizeMed);
+  const deleted    = getDeletedMedNames();
+  const stored     = JSON.parse(localStorage.getItem(KEY_MEDS) || '[]').map(normalizeMed);
   const storedByName = new Map(stored.map(m => [m.name, m]));
 
-  const defaults = DEFAULT_MEDS.map(d => storedByName.get(d.name) ?? { ...d, times: EMPTY_TIMES() });
-  const userMeds  = stored.filter(m => !DEFAULT_MED_NAMES.has(m.name));
+  const defaults = DEFAULT_MEDS
+    .filter(d => !deleted.has(d.name))
+    .map(d => storedByName.get(d.name) ?? { ...d, times: EMPTY_TIMES() });
+
+  const userMeds = stored.filter(m => !DEFAULT_MED_NAMES.has(m.name));
 
   return [...defaults, ...userMeds];
 }
 
-// Save only: default meds that have at least one time set + all user-added meds
 function saveMeds(allMeds) {
+  // Store user-added meds + default meds that have times set
   const toStore = allMeds.filter(m =>
     !DEFAULT_MED_NAMES.has(m.name) ||
     Object.values(m.times).some(t => t)
@@ -979,15 +985,14 @@ function renderMeds() {
       m.times.昼 ? `🌤${m.times.昼}` : null,
       m.times.夜 ? `🌙${m.times.夜}` : null,
     ].filter(Boolean);
-    const hasTime    = slots.length > 0;
-    const isDefault  = DEFAULT_MED_NAMES.has(m.name);
+    const hasTime = slots.length > 0;
     return `
-      <div class="med-chip-wrap${isDefault ? ' is-default' : ''}">
+      <div class="med-chip-wrap">
         <button class="med-chip" data-med="${escAttr(m.name)}" onclick="takeMedBtn(this)">
           💊 ${escHtml(m.name)}${hasTime ? `<span class="med-chip-times">${slots.join(' ')}</span>` : ''}
         </button>
-        <button class="med-time-btn${hasTime ? ' set' : ''}${isDefault ? ' default-pos' : ''}" data-idx="${i}" onclick="openTimeEditor(${i})" title="服薬時間を設定">⏰</button>
-        ${isDefault ? '' : `<button class="med-del" data-idx="${i}" onclick="deleteMedBtn(this)" title="削除">×</button>`}
+        <button class="med-time-btn${hasTime ? ' set' : ''}" data-idx="${i}" onclick="openTimeEditor(${i})" title="服薬時間を設定">⏰</button>
+        <button class="med-del" data-idx="${i}" onclick="deleteMedBtn(this)" title="削除">×</button>
       </div>
     `;
   }).join('');
@@ -1005,8 +1010,16 @@ function addMed() {
   if (!name) return;
   const meds = getMeds();
   if (meds.some(m => m.name === name)) { showToast('すでに登録されています'); return; }
-  meds.push({ name, times: EMPTY_TIMES() });
-  saveMeds(meds);
+
+  // If re-adding a previously deleted default, remove it from the deleted list
+  if (DEFAULT_MED_NAMES.has(name)) {
+    const deleted = getDeletedMedNames();
+    deleted.delete(name);
+    localStorage.setItem(KEY_DELETED_MEDS, JSON.stringify([...deleted]));
+  } else {
+    meds.push({ name, times: EMPTY_TIMES() });
+  }
+  saveMeds(getMeds());
   input.value = '';
   document.getElementById('addMedRow').classList.remove('open');
   renderMeds();
@@ -1014,8 +1027,16 @@ function addMed() {
 }
 
 function deleteMedBtn(btn) {
-  const idx = parseInt(btn.dataset.idx);
+  const idx  = parseInt(btn.dataset.idx);
   const meds = getMeds();
+  const name = meds[idx].name;
+
+  if (DEFAULT_MED_NAMES.has(name)) {
+    const deleted = getDeletedMedNames();
+    deleted.add(name);
+    localStorage.setItem(KEY_DELETED_MEDS, JSON.stringify([...deleted]));
+  }
+
   meds.splice(idx, 1);
   saveMeds(meds);
   if (editingMedIdx === idx) {
