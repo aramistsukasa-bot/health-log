@@ -529,6 +529,15 @@
     }
     .csv-btn:hover { background: var(--beige); }
 
+    /* ── PDF button ── */
+    .pdf-btn {
+      font-size: 0.75rem; color: #fff;
+      background: var(--blue-dark); border: none;
+      border-radius: 6px; padding: 4px 10px; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .pdf-btn:hover { background: var(--blue); }
+
     /* ── Toast ── */
     .toast {
       position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(20px);
@@ -578,6 +587,19 @@
 <body>
 
 <div class="toast" id="toast"></div>
+
+<!-- PDF Modal -->
+<div class="modal-overlay hidden" id="pdfModal">
+  <div class="modal-card">
+    <h2>📄 PDFレポートを作成</h2>
+    <p class="modal-desc">お医者さんに見せる服薬記録レポートを作成します。<br>印刷ダイアログで「PDFとして保存」を選択してください。</p>
+    <input class="modal-input" type="text" id="pdfPatientName"
+      placeholder="患者名（任意）"
+      onkeydown="if(event.key==='Enter')generateAndPrintPDF()">
+    <button class="modal-save-btn" onclick="generateAndPrintPDF()">📄 PDFを作成する</button>
+    <button style="width:100%;padding:9px;background:none;border:1px solid var(--border);border-radius:10px;font-size:0.88rem;cursor:pointer;margin-top:8px;color:var(--text-light);" onclick="closePDFModal()">キャンセル</button>
+  </div>
+</div>
 
 <!-- API Key Modal -->
 <div class="modal-overlay hidden" id="apiModal">
@@ -698,7 +720,8 @@
     <div class="records-header">
       <span class="records-title">健康記録</span>
       <div style="display:flex;gap:8px;">
-        <button class="csv-btn" onclick="exportCSV()">⬇ CSVでエクスポート</button>
+        <button class="pdf-btn" onclick="openPDFModal()">📄 PDFでダウンロード</button>
+        <button class="csv-btn" onclick="exportCSV()">⬇ CSV</button>
         <button class="clear-btn" onclick="clearAllRecords()">全削除</button>
       </div>
     </div>
@@ -1572,6 +1595,174 @@ function renderCalendar() {
   }
 
   document.getElementById('calGrid').innerHTML = html;
+}
+
+// ══════════════════════════
+//  PDF Export
+// ══════════════════════════
+function openPDFModal() {
+  document.getElementById('pdfPatientName').value = '';
+  document.getElementById('pdfModal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('pdfPatientName').focus(), 100);
+}
+
+function closePDFModal() {
+  document.getElementById('pdfModal').classList.add('hidden');
+}
+
+function generateAndPrintPDF() {
+  const patientName = document.getElementById('pdfPatientName').value.trim();
+  closePDFModal();
+
+  const medLog = getMedLog();
+  const meds   = getMeds();
+
+  if (medLog.length === 0 && meds.every(m => !Object.values(m.times).some(t => t))) {
+    showToast('エクスポートするデータがありません');
+    return;
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+  let startDate = today;
+  if (medLog.length > 0) {
+    startDate = medLog.map(e => e.date).sort()[0];
+  } else {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    startDate = d.toISOString().split('T')[0];
+  }
+
+  const rows = [];
+  const cur = new Date(startDate + 'T12:00:00');
+  const end = new Date(today    + 'T12:00:00');
+
+  while (cur <= end) {
+    const ds        = cur.toISOString().split('T')[0];
+    const taken     = medLog.filter(e => e.date === ds);
+    const takenNames = new Set(taken.map(e => e.name));
+
+    taken.forEach(e => rows.push({ date: ds, name: e.name, time: e.time, status: 'taken' }));
+
+    meds.forEach(med => {
+      if (takenNames.has(med.name)) return;
+      [['朝', med.times.朝], ['昼', med.times.昼], ['夜', med.times.夜]]
+        .filter(([, t]) => t)
+        .forEach(([, t]) => rows.push({ date: ds, name: med.name, time: t, status: 'missed' }));
+    });
+
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  if (rows.length === 0) {
+    showToast('エクスポートするデータがありません');
+    return;
+  }
+
+  rows.sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+
+  const fmt = (ds, opts) => new Date(ds + 'T12:00:00').toLocaleDateString('ja-JP', opts);
+  const reportDate     = fmt(today, { year:'numeric', month:'long', day:'numeric' });
+  const dateRangeStart = fmt(startDate, { year:'numeric', month:'long', day:'numeric' });
+  const dateRangeEnd   = fmt(today,     { year:'numeric', month:'long', day:'numeric' });
+
+  const takenCount  = rows.filter(r => r.status === 'taken').length;
+  const missedCount = rows.filter(r => r.status === 'missed').length;
+  const total       = rows.length;
+  const rate        = total > 0 ? Math.round(takenCount / total * 100) : 0;
+
+  const escP = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  const tableRows = rows.map(r => {
+    const fmtD = fmt(r.date, { year:'numeric', month:'short', day:'numeric', weekday:'short' });
+    const cls  = r.status === 'taken' ? 'status-taken' : 'status-missed';
+    const txt  = r.status === 'taken' ? '✓ 服用済み' : '✗ 未服用';
+    return `<tr>
+      <td>${fmtD}</td>
+      <td>${escP(r.name)}</td>
+      <td>${r.time}</td>
+      <td class="${cls}">${txt}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>服薬記録レポート</title>
+<style>
+  @page { margin: 20mm 15mm; size: A4; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Hiragino Sans","Yu Gothic UI","Noto Sans JP",sans-serif; color: #2d2d2d; font-size: 10pt; line-height: 1.5; }
+  .header { border-bottom: 3px solid #38b6bf; padding-bottom: 14px; margin-bottom: 18px; }
+  .header-top { display: flex; align-items: flex-end; justify-content: space-between; }
+  .title { font-size: 20pt; font-weight: 700; color: #38b6bf; letter-spacing: 0.03em; }
+  .subtitle { font-size: 9pt; color: #888; margin-top: 2px; }
+  .report-date { font-size: 8.5pt; color: #666; text-align: right; }
+  .patient-box { background: #f0fafc; border: 1.5px solid #93dfe6; border-radius: 8px; padding: 10px 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 10px; }
+  .patient-label { font-size: 8pt; color: #38b6bf; font-weight: 700; letter-spacing: 0.05em; white-space: nowrap; }
+  .patient-name { font-size: 13pt; font-weight: 600; color: #2d2d2d; }
+  .summary { display: flex; gap: 12px; margin-bottom: 18px; }
+  .summary-card { flex: 1; border-radius: 8px; padding: 10px 14px; text-align: center; }
+  .summary-card.total  { background: #f5f0e8; border: 1px solid #ddd5c5; }
+  .summary-card.taken  { background: #e8f5ea; border: 1px solid #b6debb; }
+  .summary-card.missed { background: #fff0f0; border: 1px solid #f0bfbf; }
+  .summary-card.rate   { background: #e8f4fc; border: 1px solid #93dfe6; }
+  .summary-num  { font-size: 18pt; font-weight: 700; display: block; }
+  .summary-lbl  { font-size: 7.5pt; color: #666; display: block; margin-top: 1px; }
+  .total .summary-num  { color: #5a4e40; }
+  .taken .summary-num  { color: #1a7a3a; }
+  .missed .summary-num { color: #c03030; }
+  .rate .summary-num   { color: #38b6bf; }
+  .section-label { font-size: 8.5pt; color: #38b6bf; font-weight: 700; letter-spacing: 0.04em; margin-bottom: 8px; text-transform: uppercase; }
+  .period { font-size: 8.5pt; color: #666; margin-bottom: 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  thead tr { background: #38b6bf; }
+  th { padding: 8px 12px; text-align: left; color: #fff; font-size: 9pt; font-weight: 600; letter-spacing: 0.02em; }
+  th:last-child { text-align: center; }
+  td { padding: 7px 12px; font-size: 9pt; border-bottom: 1px solid #e8e0d4; }
+  td:last-child { text-align: center; }
+  tr:nth-child(even) td { background: #f9f6f1; }
+  .status-taken  { color: #1a7a3a; font-weight: 600; }
+  .status-missed { color: #c03030; font-weight: 600; }
+  .footer { margin-top: 28px; padding-top: 10px; border-top: 1px solid #ddd; text-align: center; font-size: 7.5pt; color: #aaa; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="header-top">
+    <div>
+      <div class="title">服薬記録レポート</div>
+      <div class="subtitle">Medication Log Report</div>
+    </div>
+    <div class="report-date">作成日：${reportDate}</div>
+  </div>
+</div>
+${patientName ? `<div class="patient-box"><span class="patient-label">患者名</span><span class="patient-name">${escP(patientName)}</span></div>` : ''}
+<div class="summary">
+  <div class="summary-card total"><span class="summary-num">${total}</span><span class="summary-lbl">記録件数</span></div>
+  <div class="summary-card taken"><span class="summary-num">${takenCount}</span><span class="summary-lbl">服用済み</span></div>
+  <div class="summary-card missed"><span class="summary-num">${missedCount}</span><span class="summary-lbl">未服用</span></div>
+  <div class="summary-card rate"><span class="summary-num">${rate}%</span><span class="summary-lbl">服薬率</span></div>
+</div>
+<div class="section-label">服薬記録一覧</div>
+<div class="period">記録期間：${dateRangeStart} 〜 ${dateRangeEnd}</div>
+<table>
+  <thead><tr><th>日付</th><th>薬の名前</th><th>服用時間</th><th>服用状態</th></tr></thead>
+  <tbody>${tableRows}</tbody>
+</table>
+<div class="footer">このレポートは健康ログ AI アプリより出力されました</div>
+</body>
+</html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) { showToast('ポップアップがブロックされました。許可してから再試行してください'); return; }
+  win.document.write(html);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 400);
 }
 
 // ══════════════════════════
