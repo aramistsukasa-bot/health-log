@@ -1016,10 +1016,11 @@ function addMed() {
     const deleted = getDeletedMedNames();
     deleted.delete(name);
     localStorage.setItem(KEY_DELETED_MEDS, JSON.stringify([...deleted]));
+    saveMeds(getMeds());
   } else {
     meds.push({ name, times: EMPTY_TIMES() });
+    saveMeds(meds);
   }
-  saveMeds(getMeds());
   input.value = '';
   document.getElementById('addMedRow').classList.remove('open');
   renderMeds();
