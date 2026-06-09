@@ -273,6 +273,9 @@
       border-radius: 50%;
     }
     .med-del:hover { color: #c05050; background: rgba(0,0,0,0.06); }
+    /* Default meds have no delete button — tighten right padding */
+    .med-chip-wrap.is-default .med-chip { padding-right: 28px; }
+    .med-chip-wrap.is-default .med-time-btn { right: 5px; }
     .meds-empty { font-size: 0.75rem; color: var(--beige-dark); align-self: center; }
     .med-time-editor {
       display: none; flex-direction: column; gap: 7px;
@@ -930,36 +933,61 @@ const KEY_MEDS = 'hlai_meds';
 
 const EMPTY_TIMES = () => ({ 朝: null, 昼: null, 夜: null });
 
+// Default meds hard-coded in HTML — always visible in any browser
+const DEFAULT_MEDS = [
+  'タリージェ', 'コペラ', 'アリナミン', '酸化マグネシウム',
+  'プレマリン', 'デュファストン', 'オパルモン',
+  'ボルタレン28mg', 'ボルタレン37.5mg',
+].map(name => ({ name, times: EMPTY_TIMES() }));
+
+const DEFAULT_MED_NAMES = new Set(DEFAULT_MEDS.map(d => d.name));
+
+// Normalize a raw stored entry to {name, times}
+function normalizeMed(m) {
+  if (typeof m === 'string') return { name: m, times: EMPTY_TIMES() };
+  if ('time' in m) return { name: m.name, times: { 朝: m.time || null, 昼: null, 夜: null } };
+  return { name: m.name, times: { ...EMPTY_TIMES(), ...m.times } };
+}
+
+// Returns [defaults (with any stored times applied), ...user-added meds]
 function getMeds() {
-  const raw = JSON.parse(localStorage.getItem(KEY_MEDS) || '[]');
-  return raw.map(m => {
-    if (typeof m === 'string') return { name: m, times: EMPTY_TIMES() };
-    if ('time' in m) return { name: m.name, times: { 朝: m.time || null, 昼: null, 夜: null } };
-    return { name: m.name, times: { ...EMPTY_TIMES(), ...m.times } };
-  });
+  const stored = JSON.parse(localStorage.getItem(KEY_MEDS) || '[]').map(normalizeMed);
+  const storedByName = new Map(stored.map(m => [m.name, m]));
+
+  const defaults = DEFAULT_MEDS.map(d => storedByName.get(d.name) ?? { ...d, times: EMPTY_TIMES() });
+  const userMeds  = stored.filter(m => !DEFAULT_MED_NAMES.has(m.name));
+
+  return [...defaults, ...userMeds];
+}
+
+// Save only: default meds that have at least one time set + all user-added meds
+function saveMeds(allMeds) {
+  const toStore = allMeds.filter(m =>
+    !DEFAULT_MED_NAMES.has(m.name) ||
+    Object.values(m.times).some(t => t)
+  );
+  localStorage.setItem(KEY_MEDS, JSON.stringify(toStore));
+  scheduleDriveSync();
 }
 
 function renderMeds() {
   const meds = getMeds();
   const el = document.getElementById('medsChips');
-  if (meds.length === 0) {
-    el.innerHTML = '<span class="meds-empty">＋ 追加ボタンで薬を登録できます</span>';
-    return;
-  }
   el.innerHTML = meds.map((m, i) => {
     const slots = [
       m.times.朝 ? `☀️${m.times.朝}` : null,
       m.times.昼 ? `🌤${m.times.昼}` : null,
       m.times.夜 ? `🌙${m.times.夜}` : null,
     ].filter(Boolean);
-    const hasTime = slots.length > 0;
+    const hasTime    = slots.length > 0;
+    const isDefault  = DEFAULT_MED_NAMES.has(m.name);
     return `
-      <div class="med-chip-wrap">
+      <div class="med-chip-wrap${isDefault ? ' is-default' : ''}">
         <button class="med-chip" data-med="${escAttr(m.name)}" onclick="takeMedBtn(this)">
           💊 ${escHtml(m.name)}${hasTime ? `<span class="med-chip-times">${slots.join(' ')}</span>` : ''}
         </button>
-        <button class="med-time-btn${hasTime ? ' set' : ''}" data-idx="${i}" onclick="openTimeEditor(${i})" title="服薬時間を設定">⏰</button>
-        <button class="med-del" data-idx="${i}" onclick="deleteMedBtn(this)" title="削除">×</button>
+        <button class="med-time-btn${hasTime ? ' set' : ''}${isDefault ? ' default-pos' : ''}" data-idx="${i}" onclick="openTimeEditor(${i})" title="服薬時間を設定">⏰</button>
+        ${isDefault ? '' : `<button class="med-del" data-idx="${i}" onclick="deleteMedBtn(this)" title="削除">×</button>`}
       </div>
     `;
   }).join('');
@@ -978,8 +1006,7 @@ function addMed() {
   const meds = getMeds();
   if (meds.some(m => m.name === name)) { showToast('すでに登録されています'); return; }
   meds.push({ name, times: EMPTY_TIMES() });
-  localStorage.setItem(KEY_MEDS, JSON.stringify(meds));
-  scheduleDriveSync();
+  saveMeds(meds);
   input.value = '';
   document.getElementById('addMedRow').classList.remove('open');
   renderMeds();
@@ -990,8 +1017,7 @@ function deleteMedBtn(btn) {
   const idx = parseInt(btn.dataset.idx);
   const meds = getMeds();
   meds.splice(idx, 1);
-  localStorage.setItem(KEY_MEDS, JSON.stringify(meds));
-  scheduleDriveSync();
+  saveMeds(meds);
   if (editingMedIdx === idx) {
     editingMedIdx = null;
     document.getElementById('medTimeEditor').classList.remove('open');
@@ -1048,8 +1074,7 @@ function saveMedTimes() {
     昼: document.getElementById('medTime昼').value || null,
     夜: document.getElementById('medTime夜').value || null,
   };
-  localStorage.setItem(KEY_MEDS, JSON.stringify(meds));
-  scheduleDriveSync();
+  saveMeds(meds);
   closeTimeEditor();
   renderMeds();
   showToast('服薬リマインダーを保存しました ⏰');
@@ -2020,7 +2045,7 @@ async function loadFromDrive() {
     const data = await readDriveData();
     if (!data) { syncToDrive(); return; } // ドライブ未登録 → ローカルをアップロード
     let changed = false;
-    if (Array.isArray(data.meds))   { localStorage.setItem(KEY_MEDS,    JSON.stringify(data.meds));   changed = true; }
+    if (Array.isArray(data.meds))   { saveMeds(data.meds); changed = true; }
     if (Array.isArray(data.medLog)) { localStorage.setItem(KEY_MED_LOG, JSON.stringify(data.medLog)); changed = true; }
     if (Array.isArray(data.logs))   { localStorage.setItem(KEY_LOGS,    JSON.stringify(data.logs));   changed = true; }
     if (changed) {
